@@ -2,6 +2,7 @@ import { ColumnOptions } from "zotero-plugin-toolkit/dist/helpers/virtualizedTab
 import { DialogHelper } from "zotero-plugin-toolkit/dist/helpers/dialog";
 import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
+import { AuthorBrowserAddon } from "./modules/authorBrowserAddon";
 
 class Addon {
   public data: {
@@ -12,17 +13,12 @@ class Addon {
     locale?: {
       current: any;
     };
-    prefs?: {
-      window: Window;
-      columns: Array<ColumnOptions>;
-      rows: Array<{ [dataKey: string]: string }>;
-    };
-    dialog?: DialogHelper;
   };
   // Lifecycle hooks
   public hooks: typeof hooks;
   // APIs
   public api: object;
+  public authorBrowserAddon: AuthorBrowserAddon;
 
   constructor() {
     this.data = {
@@ -32,6 +28,7 @@ class Addon {
     };
     this.hooks = hooks;
     this.api = {};
+    this.authorBrowserAddon = new AuthorBrowserAddon();
   }
 }
 

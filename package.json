@@ -1,23 +1,23 @@
 {
-  "name": "zotero-plugin-template",
-  "version": "2.0.2-beta.3",
-  "description": "Zotero Plugin Template",
+  "name": "zotero-author-browser",
+  "version": "0.0.1",
+  "description": "Zotero Author Browser pannel",
   "config": {
-    "addonName": "Zotero Plugin Template",
-    "addonID": "addontemplate@euclpts.com",
-    "addonRef": "addontemplate",
-    "addonInstance": "AddonTemplate",
-    "prefsPrefix": "extensions.zotero.addontemplate"
+    "addonName": "Zotero Author Browser",
+    "addonID": "authorbrowser@junting.li",
+    "addonRef": "author-browser",
+    "addonInstance": "AuthorBrowser",
+    "prefsPrefix": "extensions.zotero.authorbrowser"
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/windingwind/zotero-plugin-template.git"
+    "url": "https://github.com/StevenGLee/zotero-author-browser.git"
   },
-  "author": "windingwind",
+  "author": "Junting Li",
   "bugs": {
-    "url": "https://github.com/windingwind/zotero-plugin-template/issues"
+    "url": "https://github.com/StevenGLee/zotero-author-browser/issues"
   },
-  "homepage": "https://github.com/windingwind/zotero-plugin-template#readme",
+  "homepage": "https://github.com/StevenGLee/zotero-author-browser",
   "license": "AGPL-3.0-or-later",
   "scripts": {
     "start": "zotero-plugin serve",
