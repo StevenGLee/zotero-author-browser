@@ -1,5 +1,18 @@
+// @ts-nocheck
 import { getString, initLocale } from "../utils/locale";
 import { AuthorBrowserDialog } from "./authorBrowserDialog";
+
+export interface CreatorDataRow {
+  firstName: string;
+  lastName: string;
+  creatorID: number;
+  itemCounts: number;
+}
+export interface CreatorQueryDataRow {
+  firstName: string;
+  lastName: string;
+  creatorID: number;
+}
 
 class AuthorBrowserAddon {
   static registerToolsMenuItem() {
@@ -10,32 +23,27 @@ class AuthorBrowserAddon {
       commandListener: (ev) => AuthorBrowserDialog.onDialog(),
     });
   }
-  private db: Zotero.DBConnection;
+  private db;
 
   static registerCreatorTransformMenuItem() {
     // const menuIcon = `chrome://${config.addonRef}/content/icons/favicon@0.5x.png`;
     // item menuitem with icon
-    ztoolkit.Menu.register(
-      ztoolkit.Menu.getGlobal("document").querySelector(
-        "#zotero-creator-transform-menu",
-      ),
-      {
+    const menu = ztoolkit.Menu.getGlobal("document").querySelector(
+      "#zotero-creator-transform-menu",
+    ) as XUL.MenuPopup;
+    if (menu) {
+      ztoolkit.Menu.register(menu, {
         tag: "menuseparator",
-      },
-    );
-    ztoolkit.Menu.register(
-      ztoolkit.Menu.getGlobal("document").querySelector(
-        "#zotero-creator-transform-menu",
-      ),
-      {
+      });
+      ztoolkit.Menu.register(menu, {
         tag: "menuitem",
         id: "zotero-show-author",
         label: getString("show-author"),
         commandListener: async (ev) =>
           addon.authorBrowserAddon.showAuthorFromPopupMenu(ev),
         // icon: menuIcon,
-      },
-    );
+      });
+    }
   }
 
   public async initAuthorDatabase() {}
@@ -51,10 +59,9 @@ class AuthorBrowserAddon {
       return result;
     });
 
-    const creators = [];
+    const creators: CreatorDataRow[] = [];
     await Zotero.DB.executeTransaction(async function () {
-      let rows;
-      rows = await doGetAllCreators();
+      const rows = await doGetAllCreators();
       for (let i = 0; i < rows.length; i++) {
         creators.push({
           firstName: rows[i].firstName,
@@ -71,11 +78,14 @@ class AuthorBrowserAddon {
   }
 
   public async getCreatorMainID(id: number) {
-    const doGetCreatorMainID = Zotero.Promise.coroutine(function* (creatorID) {
+    const doGetCreatorMainID = Zotero.Promise.coroutine(function* (
+      creatorID: number,
+    ) {
       this.db.requireTransaction();
       const sql =
         "SELECT mainID FROM creatorAlias WHERE aliasID = " + creatorID;
-      const result = yield this.db.valueQueryAsync(sql);
+      const result: Promise<CreatorQueryDataRow>[] =
+        yield this.db.valueQueryAsync(sql);
       return result;
     });
     let creatorMainID: number;
@@ -100,7 +110,7 @@ class AuthorBrowserAddon {
     );
     let creatorAliases;
     await this.db.executeTransaction(async function () {
-      creatorAliases = await doGetAllAliasByMainID(id);
+      creatorAliases = await doGetAllAliasByMainID(mainId);
     });
     if (!creatorAliases) {
       creatorAliases = [mainId];
@@ -136,9 +146,9 @@ class AuthorBrowserAddon {
       visibilityGroup: "default",
       isSearchMode: () => true,
       getItems: async function () {
-        await Zotero.Libraries.get(
-          Zotero.Libraries.userLibraryID,
-        ).waitForDataLoad("item");
+        const lib = Zotero.Libraries.get(Zotero.Libraries.userLibraryID);
+        if (lib) await lib.waitForDataLoad("item");
+        else return false;
         const ids = await s.search();
         return Zotero.Items.get(ids);
       },
@@ -154,16 +164,31 @@ class AuthorBrowserAddon {
       isTrash: () => false,
     };
     const itemsView = ZoteroPane.itemsView;
-    itemsView.changeCollectionTreeRow(collectionTreeRow);
-    ZoteroPane.collectionsView.selection.clearSelection();
-    document.getElementById("item-tree-main-default").focus();
+    if (itemsView) itemsView.changeCollectionTreeRow(collectionTreeRow);
+    else return;
+    if (ZoteroPane.collectionsView)
+      ZoteroPane.collectionsView.selection.clearSelection();
+    else return;
+    (
+      document.getElementById("item-tree-main-default") as XULTreeElement
+    ).focus();
   }
 
   public async showAuthorFromPopupMenu(ev: Event) {
-    const row = ev.target.ownerDocument.popupNode.closest(".meta-row");
-    const fields = ZoteroPane.itemPane
-      .querySelector("item-box")
-      .getCreatorFields(row);
+    let row;
+    let fields;
+    if (ev.target) {
+      row = (ev.target as XULPopupElement).ownerDocument.popupNode.closest(
+        ".meta-row",
+      );
+    } else {
+      return;
+    }
+    if (ZoteroPane.itemPane) {
+      fields = ZoteroPane.itemPane
+        .querySelector("item-box")
+        .getCreatorFields(row);
+    }
     let id: number;
     await Zotero.DB.executeTransaction(async function () {
       id = await Zotero.Creators.getIDFromData({
