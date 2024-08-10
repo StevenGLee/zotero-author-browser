@@ -1,6 +1,6 @@
 {
   "name": "zotero-author-browser",
-  "version": "0.0.1",
+  "version": "0.1.0",
   "description": "Zotero Author Browser pannel",
   "config": {
     "addonName": "Zotero Author Browser",
@@ -28,6 +28,7 @@
     "update-deps": "npm update --save"
   },
   "dependencies": {
+    "release-it": "^17.6.0",
     "zotero-plugin-toolkit": "^2.3.31"
   },
   "devDependencies": {
