@@ -1,7 +1,11 @@
 import { config } from "../package.json";
 import { getString, initLocale } from "./utils/locale";
 import { createZToolkit } from "./utils/ztoolkit";
-import { AuthorBrowserAddon } from "./modules/authorBrowserAddon";
+import {
+  registerCreatorTransformMenuItem,
+  registerToolsMenuItem,
+  deleteABSavedSearches,
+} from "./modules/authorBrowserAddon";
 
 async function onStartup() {
   await Promise.all([
@@ -22,16 +26,19 @@ async function onMainWindowLoad(win: Window): Promise<void> {
   // @ts-ignore This is a moz feature
   window.MozXULElement.insertFTLIfNeeded(`${config.addonRef}-mainWindow.ftl`);
 
-  AuthorBrowserAddon.registerCreatorTransformMenuItem();
-  AuthorBrowserAddon.registerToolsMenuItem();
+  registerCreatorTransformMenuItem();
+  registerToolsMenuItem();
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
+  deleteABSavedSearches();
   ztoolkit.unregisterAll();
 }
 
 function onShutdown(): void {
   ztoolkit.unregisterAll();
+
+  deleteABSavedSearches();
   // Remove addon object
   addon.data.alive = false;
   delete Zotero[config.addonInstance];

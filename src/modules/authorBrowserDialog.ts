@@ -1,7 +1,11 @@
 import { config } from "../../package.json";
 import { getLocaleID, getString } from "../utils/locale";
 import { isWindowAlive } from "../utils/window";
-import { AuthorBrowserAddon, CreatorDataRow } from "./authorBrowserAddon";
+import {
+  showAuthorByID,
+  CreatorDataRow,
+  getAllCreators,
+} from "./authorBrowserAddon";
 
 export async function onDialog() {
   refresh();
@@ -62,7 +66,7 @@ export async function onDialog() {
         updateButtons();
       })
       .setProp("onActivate", (ev) => {
-        addon.authorBrowserAddon.showAuthorByID(getSelectedNoteIds());
+        showAuthorByID(getSelectedNoteIds());
         return true;
       })
       .setProp("onColumnSort", (columnIndex, ascending) => {
@@ -107,7 +111,7 @@ export async function onDialog() {
       capitalizeCreatorName();
     });
     showItemsButton.addEventListener("click", () => {
-      addon.authorBrowserAddon.showAuthorByID(getSelectedNoteIds());
+      showAuthorByID(getSelectedNoteIds());
     });
   }
 }
@@ -135,9 +139,7 @@ async function quickSort() {
 
 async function updateData() {
   const sortKey = sortDataKeys[addon.data.manager.columnIndex];
-  addon.data.manager.data = (
-    await addon.authorBrowserAddon.getAllCreators()
-  ).sort((a, b) => {
+  addon.data.manager.data = (await getAllCreators()).sort((a, b) => {
     if (!a || !b) {
       return 0;
     }

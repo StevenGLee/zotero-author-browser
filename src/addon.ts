@@ -2,7 +2,6 @@ import { VirtualizedTableHelper } from "zotero-plugin-toolkit/dist/helpers/virtu
 import { DialogHelper } from "zotero-plugin-toolkit/dist/helpers/dialog";
 import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
-import { AuthorBrowserAddon } from "./modules/authorBrowserAddon";
 import { CreatorDataRow } from "./modules/authorBrowserAddon";
 
 class Addon {
@@ -21,12 +20,13 @@ class Addon {
       columnIndex: number;
       columnAscending: boolean;
     };
+    // @ts-ignore
+    db: Zotero.DBConnection;
   };
   // Lifecycle hooks
   public hooks: typeof hooks;
   // APIs
   public api: object;
-  public authorBrowserAddon: AuthorBrowserAddon;
 
   constructor() {
     this.data = {
@@ -38,10 +38,10 @@ class Addon {
         columnAscending: false,
         columnIndex: 2,
       },
+      db: null,
     };
     this.hooks = hooks;
     this.api = {};
-    this.authorBrowserAddon = new AuthorBrowserAddon();
   }
 }
 
