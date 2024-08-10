@@ -1,12 +1,12 @@
 // @ts-nocheck
 import { getString, initLocale } from "../utils/locale";
-import { AuthorBrowserDialog } from "./authorBrowserDialog";
+import { onDialog } from "./authorBrowserDialog";
 
 export interface CreatorDataRow {
   firstName: string;
   lastName: string;
   creatorID: number;
-  itemCounts: number;
+  itemCount: number;
 }
 export interface CreatorQueryDataRow {
   firstName: string;
@@ -17,10 +17,13 @@ export interface CreatorQueryDataRow {
 class AuthorBrowserAddon {
   static registerToolsMenuItem() {
     ztoolkit.Menu.register("menuTools", {
+      tag: "menuseparator",
+    });
+    ztoolkit.Menu.register("menuTools", {
       tag: "menuitem",
       id: "author-browser-tool-menu-item",
       label: getString("author-browser-tool-menu-item-label"),
-      commandListener: (ev) => AuthorBrowserDialog.onDialog(),
+      commandListener: (ev) => onDialog(),
     });
   }
   private db;
@@ -67,7 +70,7 @@ class AuthorBrowserAddon {
           firstName: rows[i].firstName,
           lastName: rows[i].lastName,
           creatorID: rows[i].creatorID,
-          itemCounts: await Zotero.Creators.countItemAssociations(
+          itemCount: await Zotero.Creators.countItemAssociations(
             rows[i].creatorID,
           ),
         });
@@ -118,7 +121,7 @@ class AuthorBrowserAddon {
     return creatorAliases;
   }
 
-  public showAuthorByID(id: number) {
+  public async showAuthorByID(id: number) {
     const creator = Zotero.Creators.get(id);
     const fullName = creator.firstName + " " + creator.lastName;
     const s = new Zotero.Search({
@@ -167,11 +170,13 @@ class AuthorBrowserAddon {
     if (itemsView) itemsView.changeCollectionTreeRow(collectionTreeRow);
     else return;
     if (ZoteroPane.collectionsView)
-      ZoteroPane.collectionsView.selection.clearSelection();
+      await ZoteroPane.collectionsView.selection.clearSelection();
     else return;
     (
       document.getElementById("item-tree-main-default") as XULTreeElement
     ).focus();
+    ZoteroPane.collectionsView.runListeners("select");
+    //addAuthorSearchAndSelect(s);
   }
 
   public async showAuthorFromPopupMenu(ev: Event) {
@@ -200,5 +205,71 @@ class AuthorBrowserAddon {
     this.showAuthorByID(id);
   }
 }
+
+// async function addAuthorSearchAndSelect(s: Zotero.Search) {
+//   if (ZoteroPane.collectionsView) {
+//     let startRow =
+//       ZoteroPane.collectionsView._rowMap["L" + Zotero.Libraries.userLibraryID];
+//     const level = ZoteroPane.collectionsView.getLevel(startRow) + 1;
+//     let beforeRow;
+//     let hasTemporarySearchHeader = false;
+//     if (ZoteroPane.collectionsView.isContainerEmpty(startRow)) {
+//       beforeRow = startRow + 1;
+//     } else {
+//       startRow++;
+//       for (let i = startRow; i < ZoteroPane.collectionsView._rows.length; i++) {
+//         const treeRow = ZoteroPane.collectionsView.getRow(i);
+//         beforeRow = i;
+//         if (treeRow.isHeader() && treeRow.ref.id == "temporary-search") {
+//           beforeRow++;
+//           hasTemporarySearchHeader = true;
+//           break;
+//         }
+//         // If it's not a search and it's not a collection, stop
+//         if (!treeRow.isCollection() && !treeRow.isSearch()) {
+//           break;
+//         }
+//       }
+//     }
+//     if (hasTemporarySearchHeader) {
+//       for (
+//         let i = beforeRow;
+//         i < ZoteroPane.collectionsView._rows.length;
+//         i++
+//       ) {
+//         const treeRow = ZoteroPane.collectionsView.getRow(i);
+//         if (!treeRow.isSearch()) {
+//           break;
+//         }
+//         if (treeRow.ref.name == s.name) {
+//           ZoteroPane.collectionsView.selectItem(treeRow.id);
+//           return;
+//         }
+//       }
+//     }
+//     const parentNode = new Zotero.CollectionTreeRow(
+//       ZoteroPane.collectionsView,
+//       "header",
+//       {
+//         id: "temporary-search",
+//         label: Zotero.getString("temporary-search"),
+//         libraryID: -1,
+//       },
+//       level,
+//     );
+//     ZoteroPane.collectionsView._addRow(parentNode, beforeRow);
+//     beforeRow++;
+//     const newTreeRow = new Zotero.CollectionTreeRow(
+//       ZoteroPane.collectionsView,
+//       "search",
+//       s,
+//       level + 1,
+//       true,
+//     );
+//     ZoteroPane.collectionsView._addRow(newTreeRow, beforeRow);
+//     ztoolkit.getGlobal("alert")(newTreeRow.id);
+//     ZoteroPane.collectionsView.selectItem(newTreeRow.id);
+//   }
+// }
 
 export { AuthorBrowserAddon };

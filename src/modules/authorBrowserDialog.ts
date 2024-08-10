@@ -1,130 +1,211 @@
 import { config } from "../../package.json";
 import { getLocaleID, getString } from "../utils/locale";
-export class AuthorBrowserDialog {
-  static async onDialog() {
-    const authorList = {
-      columns: [
-        {
-          dataKey: "firstName",
-          label: "firstName",
-          fixedWidth: true,
-          width: 100,
-        },
-        {
-          dataKey: "lastName",
-          label: "lastName",
-          fixedWidth: true,
-          width: 100,
-        },
-        {
-          dataKey: "itemCount",
-          label: "itemCount",
-          fixedWidth: true,
-          width: 100,
-        },
-      ],
-      rows: [],
+import { isWindowAlive } from "../utils/window";
+import { AuthorBrowserAddon, CreatorDataRow } from "./authorBrowserAddon";
+
+export async function onDialog() {
+  refresh();
+
+  if (isWindowAlive(addon.data.manager.window)) {
+    addon.data.manager.window?.focus();
+    // refresh();
+  } else {
+    const windowArgs = {
+      _initPromise: Zotero.Promise.defer(),
     };
-    authorList.rows = await addon.authorBrowserAddon.getAllCreators();
-    const renderLock = ztoolkit.getGlobal("Zotero").Promise.defer();
-    const dialogHelper = new ztoolkit.Dialog(10, 2);
-    dialogHelper.open("Dialog Example");
-    const tableHelper = new ztoolkit.VirtualizedTable(dialogHelper.window)
-      .setContainerId(`${config.addonRef}-table-container`)
+    const win = Zotero.getMainWindow().openDialog(
+      `chrome://${config.addonRef}/content/AllAuthorsWindow.xhtml`,
+      `${config.addonRef}-allAuthorWindow`,
+      `chrome,centerscreen,resizable,status,dialog=no`,
+      windowArgs,
+    )!;
+    await windowArgs._initPromise.promise;
+    addon.data.manager.window = win;
+    // updateData();
+    addon.data.manager.tableHelper = new ztoolkit.VirtualizedTable(win!)
+      .setContainerId("table-container")
       .setProp({
-        id: `${config.addonRef}-prefs-table`,
-        // Do not use setLocale, as it modifies the Zotero.Intl.strings
-        // Set locales directly to columns
-        columns: authorList.columns,
+        id: "author-list",
+        columns: [
+          {
+            dataKey: "firstName",
+            label: "firstName",
+            fixedWidth: false,
+          },
+          {
+            dataKey: "lastName",
+            label: "lastName",
+            fixedWidth: false,
+          },
+          {
+            dataKey: "itemCount",
+            label: "itemCount",
+            fixedWidth: false,
+          },
+        ].map((column) =>
+          Object.assign(column, {
+            label: getString(column.label),
+          }),
+        ),
         showHeader: true,
-        multiSelect: true,
-        staticColumns: true,
+        multiSelect: false,
+        staticColumns: false,
         disableFontSizeScaling: true,
       })
-      .setProp("getRowCount", () => authorList.rows.length || 0)
-      .setProp(
-        "getRowData",
-        (index) =>
-          authorList.rows[index] || {
-            firstName: "",
-            lastName: "",
-            creatorID: -1,
-            itemCounts: 0,
-          },
-      )
-      .setProp("onActivate", (event) => {
-        const id =
-          authorList.rows[tableHelper.treeInstance.selection.focused].creatorId;
-        addon.authorBrowserAddon.showAuthorByID(id);
-        document.getElementById("");
-        return false;
+      .setProp("getRowCount", () => addon.data.manager.data.length)
+      .setProp("getRowData", (index) => ({
+        firstName: addon.data.manager.data[index].firstName,
+        lastName: addon.data.manager.data[index].lastName,
+        itemCount: String(addon.data.manager.data[index].itemCount),
+      }))
+      .setProp("onSelectionChange", (selection) => {
+        updateButtons();
       })
-      .render(-1, () => {
-        renderLock.resolve();
-      });
+      .setProp("onActivate", (ev) => {
+        addon.authorBrowserAddon.showAuthorByID(getSelectedNoteIds());
+        return true;
+      })
+      .setProp("onColumnSort", (columnIndex, ascending) => {
+        addon.data.manager.columnIndex = columnIndex;
+        addon.data.manager.columnAscending = ascending > 0;
+        quickSort();
+      })
+      .render();
+    const refreshButton = win.document.querySelector(
+      "#refresh",
+    ) as HTMLButtonElement;
+    const renameButton = win.document.querySelector(
+      "#rename",
+    ) as HTMLButtonElement;
+    const aliasButton = win.document.querySelector(
+      "#alias",
+    ) as HTMLButtonElement;
+    const swapButton = win.document.querySelector("#swap") as HTMLButtonElement;
+    const fixCapssButton = win.document.querySelector(
+      "#fix-caps",
+    ) as HTMLButtonElement;
+    const showItemsButton = win.document.querySelector(
+      "#show-item",
+    ) as HTMLButtonElement;
+    refreshButton.addEventListener("click", (ev) => {
+      refresh();
+    });
+    renameButton.disabled = true;
+    renameButton.addEventListener("click", async (ev) => {
+      refresh();
+    });
+    aliasButton.disabled = true;
+    aliasButton.addEventListener("click", (ev) => {
+      refresh();
+    });
+
+    swapButton.addEventListener("click", () => {
+      swapNames();
+      refresh();
+    });
+    fixCapssButton.addEventListener("click", () => {
+      capitalizeCreatorName();
+    });
+    showItemsButton.addEventListener("click", () => {
+      addon.authorBrowserAddon.showAuthorByID(getSelectedNoteIds());
+    });
   }
+}
 
-  //   public async addAuthorList() {
-  //     if(ZoteroPane.collectionsView)
-  //     {
-  //     let startRow =
-  //       ZoteroPane.collectionsView._rowMap["L" + Zotero.Libraries.userLibraryID];
-  //     const level = ZoteroPane.collectionsView.getLevel(startRow) + 1;
-  //     let beforeRow;
-  //     if (ZoteroPane.collectionsView.isContainerEmpty(startRow)) {
-  //       beforeRow = startRow + 1;
-  //     } else {
-  //       startRow++;
-  //       for (let i = startRow; i < ZoteroPane.collectionsView._rows.length; i++) {
-  //         const treeRow = ZoteroPane.collectionsView.getRow(i);
-  //         beforeRow = i;
+const sortDataKeys = ["firstName", "lastName", "itemCount"] as Array<
+  keyof CreatorDataRow
+>;
 
-  //         // If we've reached something other than collections, stop
-  //         if (treeRow.isSearch()) {
-  //           break;
-  //         }
-  //         // If it's not a search and it's not a collection, stop
-  //         else if (!treeRow.isCollection()) {
-  //           break;
-  //         }
-  //       }
-  //     }
-  //     const parentSearch = new Zotero.Search({
-  //       name: Zotero.getString("pane.collections.groupLibraries"),
-  //       libraryID: Zotero.Libraries.userLibraryID,
-  //     });
+async function quickSort() {
+  const sortKey = sortDataKeys[addon.data.manager.columnIndex];
+  addon.data.manager.data.sort((a, b) => {
+    if (!a || !b) {
+      return 0;
+    }
+    const valueA = String(a[sortKey] || "");
+    const valueB = String(b[sortKey] || "");
+    return addon.data.manager.columnAscending
+      ? valueA.localeCompare(valueB)
+      : valueB.localeCompare(valueA);
+  });
 
-  //     const parentNode = new Zotero.CollectionTreeRow(
-  //       ZoteroPane.collectionsView,
-  //       "search",
-  //       parentSearch,
-  //       level,
-  //       false,
-  //     );
-  //     ZoteroPane.collectionsView._addRow(parentNode, beforeRow);
+  await updateTable();
+  updateButtons();
+}
 
-  //     for (let i = 0; i < rows.length; i++) {
-  //       beforeRow++;
-  //       const row = rows[i];
-  //       const fullName = row.firstName + " " + row.lastName;
-  //       const s = new Zotero.Search({
-  //         name: fullName,
-  //         libraryID: Zotero.Libraries.userLibraryID,
-  //       });
-  //       s.name = fullName;
-  //       s.addCondition("joinMode", "any");
-  //       s.addCondition("creator", "is", fullName);
-  //       s.parentID = parentSearch.id;
-  //       ZoteroPane.collectionsView._addRow(
-  //         new Zotero.CollectionTreeRow(
-  //           ZoteroPane.collectionsView,
-  //           "search",
-  //           s,
-  //           level + 1,
-  //           true,
-  //         ),
-  //         beforeRow,
-  //       );
-  //     }}
-  //   }
+async function updateData() {
+  const sortKey = sortDataKeys[addon.data.manager.columnIndex];
+  addon.data.manager.data = (
+    await addon.authorBrowserAddon.getAllCreators()
+  ).sort((a, b) => {
+    if (!a || !b) {
+      return 0;
+    }
+    const valueA = String(a[sortKey] || "");
+    const valueB = String(b[sortKey] || "");
+    return addon.data.manager.columnAscending
+      ? valueA.localeCompare(valueB)
+      : valueB.localeCompare(valueA);
+  });
+}
+function updateButtons() {
+  const win = addon.data.manager.window;
+  if (!win) {
+    return;
+  }
+  const fixCapssButton = win.document.querySelector(
+    "#fix-caps",
+  ) as HTMLButtonElement;
+  if (canCapitalizeCreatorName(getSelectedNoteIds())) {
+    fixCapssButton.disabled = false;
+  } else {
+    fixCapssButton.disabled = true;
+  }
+}
+async function updateTable() {
+  return new Promise<void>((resolve) => {
+    addon.data.manager.tableHelper?.render(undefined, (_) => {
+      resolve();
+    });
+  });
+}
+async function refresh() {
+  await updateData();
+  await updateTable();
+  updateButtons();
+}
+function getSelectedNoteIds() {
+  let id: number = -1;
+  for (const idx of addon.data.manager.tableHelper?.treeInstance.selection.selected?.keys() ||
+    []) {
+    id = addon.data.manager.data[idx].creatorID;
+  }
+  return id;
+}
+async function swapNames() {
+  const creatorID = getSelectedNoteIds();
+  const fields = Zotero.Creators.get(creatorID);
+  const lastName = fields.lastName;
+  const firstName = fields.firstName;
+  fields.lastName = firstName;
+  fields.firstName = lastName;
+  Zotero.Creators.updateCreator(creatorID, fields);
+}
+
+function canCapitalizeCreatorName(creatorID: number) {
+  const fields = Zotero.Creators.get(creatorID);
+  return (
+    (fields.firstName &&
+      Zotero.Utilities.capitalizeName(fields.firstName) != fields.firstName) ||
+    (fields.lastName &&
+      Zotero.Utilities.capitalizeName(fields.lastName) != fields.lastName)
+  );
+}
+
+async function capitalizeCreatorName() {
+  const creatorID = getSelectedNoteIds();
+  const fields = Zotero.Creators.get(creatorID);
+  fields.lastName = Zotero.Utilities.capitalizeName(fields.lastName);
+  fields.firstName = Zotero.Utilities.capitalizeName(fields.firstName);
+  Zotero.Creators.updateCreator(creatorID, fields);
 }

@@ -1,0 +1,17 @@
+title = 作者浏览器
+refresh = 
+    .label = 刷新
+    .tooltiptext = 刷新作者列表
+rename = 
+    .label = 重命名
+    .tooltiptext = 编辑作者的名字
+alias = 
+    .label = 别名管理
+    .tooltiptext = 创建/删除作者的别名
+swap = 
+    .label = 交换 姓/名
+fix-caps = 
+    .label = 修正大小写
+show-item = 
+    .label = 作者条目
+    .tooltiptext = 包含此作者的所有条目

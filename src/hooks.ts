@@ -23,7 +23,7 @@ async function onMainWindowLoad(win: Window): Promise<void> {
   window.MozXULElement.insertFTLIfNeeded(`${config.addonRef}-mainWindow.ftl`);
 
   AuthorBrowserAddon.registerCreatorTransformMenuItem();
-  // AuthorBrowserAddon.registerToolsMenuItem();
+  AuthorBrowserAddon.registerToolsMenuItem();
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {

@@ -1,8 +1,9 @@
-import { ColumnOptions } from "zotero-plugin-toolkit/dist/helpers/virtualizedTable";
+import { VirtualizedTableHelper } from "zotero-plugin-toolkit/dist/helpers/virtualizedTable";
 import { DialogHelper } from "zotero-plugin-toolkit/dist/helpers/dialog";
 import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
 import { AuthorBrowserAddon } from "./modules/authorBrowserAddon";
+import { CreatorDataRow } from "./modules/authorBrowserAddon";
 
 class Addon {
   public data: {
@@ -12,6 +13,13 @@ class Addon {
     ztoolkit: ZToolkit;
     locale?: {
       current: any;
+    };
+    manager: {
+      window?: Window;
+      tableHelper?: VirtualizedTableHelper;
+      data: CreatorDataRow[];
+      columnIndex: number;
+      columnAscending: boolean;
     };
   };
   // Lifecycle hooks
@@ -25,6 +33,11 @@ class Addon {
       alive: true,
       env: __env__,
       ztoolkit: createZToolkit(),
+      manager: {
+        data: [],
+        columnAscending: false,
+        columnIndex: 2,
+      },
     };
     this.hooks = hooks;
     this.api = {};

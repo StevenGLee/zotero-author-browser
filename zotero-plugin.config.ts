@@ -50,11 +50,11 @@ export default defineConfig({
     //   },
     // },
   },
-  // release: {
-  //   bumpp: {
-  //     execute: "npm run build",
-  //   },
-  // },
+  release: {
+    bumpp: {
+      execute: "npm run build",
+    },
+  },
 
   // If you need to see a more detailed build log, uncomment the following line:
   // logLevel: "trace",
