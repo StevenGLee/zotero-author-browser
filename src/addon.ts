@@ -4,6 +4,14 @@ import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
 import { CreatorDataRow } from "./modules/authorBrowserAddon";
 
+export interface AuthorAliases {
+  aliasedCreatorIDs: Array<number>;
+  aliases: Array<{
+    mainID: number;
+    aliasIDs: Array<number>;
+  }>;
+}
+
 class Addon {
   public data: {
     alive: boolean;
@@ -19,9 +27,18 @@ class Addon {
       data: CreatorDataRow[];
       columnIndex: number;
       columnAscending: boolean;
+      renameDialog?;
+      aliasEditor: {
+        window?: Window;
+        nonAliastableHelper?: VirtualizedTableHelper;
+        aliastableHelper?: VirtualizedTableHelper;
+        nonAliasTableData: CreatorDataRow[];
+        aliasTableData: number[];
+        columnIndex: number;
+        columnAscending: boolean;
+      };
     };
-    // @ts-ignore
-    db: Zotero.DBConnection;
+    authorAliases: AuthorAliases;
   };
   // Lifecycle hooks
   public hooks: typeof hooks;
@@ -37,8 +54,17 @@ class Addon {
         data: [],
         columnAscending: false,
         columnIndex: 2,
+        aliasEditor: {
+          nonAliasTableData: [],
+          aliasTableData: [],
+          columnIndex: 0,
+          columnAscending: true,
+        },
       },
-      db: null,
+      authorAliases: {
+        aliasedCreatorIDs: [],
+        aliases: [],
+      },
     };
     this.hooks = hooks;
     this.api = {};

@@ -19,6 +19,8 @@ declare const rootURI: string;
 
 declare const addon: import("../src/addon").default;
 
+declare type AuthorAliases = ReturnType<import("../src/addon").AuthorAliases>;
+
 declare const __env__: "production" | "development";
 
 declare class Localization {}
