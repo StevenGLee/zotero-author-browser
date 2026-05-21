@@ -3,19 +3,56 @@
 [![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
-This repo is under early development.
+Zotero Author Browser helps you browse creators, inspect author coverage, and manage author aliases in a Zotero library.
 
-This addon simplifies viewing and statistics of authors/creators in a zotero library.
+[English](README.md) | [Simplified Chinese](README-zhCN.md)
 
-[English](README.md) | [简体中文](README-zhCN.md)
+## Current Status
 
-## TODO
+The plugin is actively developed and now supports a working **Alias Manager** with real author alias operations.
 
-- [x] **Show All Items with This Creator**. List all items associated with a certain author/creator.
-  - [x] Add a _Show All Items with This Creator_ item to the context menu of creator items in the right side-bar.![show-author-items](./readme_imgs/show-author-items-en.png)
-- [x] **Author Browser**. Lists all authors/creators in the library in reverse order of count of associated items.
-  - [x] _Show All Items with This Creator_ when the creator row is double clicked on
-- [ ] **Author Aliases**. Associate multiple creator names to a _Main Name_ of the same person.
-  - [ ] List only the _Main Name_ in _Author Browser_ and merge the item counts
-  - [ ] List all items of all aliases of an author in _Show All Items with This Creator_.
-  - [ ] Detect name abbreviations similar to other names in the library and guide users to create author alias.
+## Implemented Features
+
+- **Show All Items with This Creator**
+  - Added to the creator context menu in Zotero's right sidebar.
+  - Also available from Author Browser row activation.
+  - Alias-aware: when a creator is aliased, results include the main author and all aliases.
+- **Author Browser**
+  - Lists creators with item counts.
+  - Supports sort, rename, swap first/last name, and capitalization fix.
+  - Shows alias names in the alias column.
+  - Merges item counts from aliases into the main author row.
+- **Alias Manager**
+  - Select an author in Author Browser, then click `Aliases` to open Alias Manager for that person.
+  - You can review `Current Aliases` and `Suggested Aliases` side by side.
+  - Common actions for daily use:
+    - `Add Selected Suggestions`
+    - `Add All Suggestions`
+    - `Add Author Browser Selection`
+    - `Restore Selected Aliases`
+    - `Refresh`
+  - You can keep multiple Alias Manager windows open for different authors.
+  - Reopening Alias Manager for the same author will focus the existing window.
+  - After add/restore actions, the latest alias list is shown directly in the manager.
+
+## Alias Rules
+
+- Uses a single-layer model: `mainID -> aliasIDs[]`.
+- Candidate suggestions are based on:
+  - Normalized full-name match.
+  - Same last name and first-name initial.
+- When adding an author that already owns an alias group, group merge is supported with confirmation.
+- Restoring aliases currently restores only the selected alias entries as independent main entries.
+
+## Development
+
+```bash
+npm install
+npm run start
+```
+
+Build:
+
+```bash
+npm run build
+```
