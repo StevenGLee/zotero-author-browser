@@ -18,6 +18,9 @@ export interface CreatorQueryDataRow {
   creatorID: number;
 }
 
+const AUTHOR_STAT_CREATOR_TYPE_IDS = [8, 24, 15];
+const AUTHOR_STAT_CREATOR_TYPE_IDS_SQL = AUTHOR_STAT_CREATOR_TYPE_IDS.join(", ");
+
 export function registerToolsMenuItem() {
   ztoolkit.Menu.register("menuTools", {
     tag: "menuseparator",
@@ -135,10 +138,10 @@ function removeInvalidAuthorAliases() {
 export async function getAllCreators(orderBy: "firstName"|"lastName"|"itemCount"|"creatorID", desc: boolean = false) {
   const doGetAllCreators = Zotero.Promise.coroutine(function* () {
     Zotero.DB.requireTransaction();
-    const sql = "SELECT creators.firstName, creators.lastName, creators.creatorID, COUNT(itemCreators.itemID) AS itemCount \
+    const sql = "SELECT creators.firstName, creators.lastName, creators.creatorID, COUNT(DISTINCT itemCreators.itemID) AS itemCount \
                  FROM creators \
                  JOIN itemCreators ON creators.creatorID = itemCreators.creatorID \
-                 WHERE creators.fieldMode = 0 AND itemCreators.creatorTypeID = 8 \
+                 WHERE creators.fieldMode = 0 AND itemCreators.creatorTypeID IN (" + AUTHOR_STAT_CREATOR_TYPE_IDS_SQL + ") \
                  GROUP BY itemCreators.creatorID \
                  ORDER BY " + orderBy + (desc ? " desc" : "");
     const result = yield Zotero.DB.queryAsync(sql);
@@ -184,11 +187,25 @@ export async function getAllCreators(orderBy: "firstName"|"lastName"|"itemCount"
       if (i < addon.data.authorAliases.aliases.length - 1)
         creators[mainIndex].aliasFullNamesString += ", ";
       creators[mainIndex].itemCount +=
-        await Zotero.Creators.countItemAssociations(alias.aliasIDs[j]);
+        await countCreatorItemsForAuthorStats(alias.aliasIDs[j]);
     }
   }
 
   return creators;
+}
+
+async function countCreatorItemsForAuthorStats(creatorID: number) {
+  const sql = "SELECT COUNT(DISTINCT itemCreators.itemID) AS itemCount \
+               FROM itemCreators \
+               JOIN creators ON creators.creatorID = itemCreators.creatorID \
+               WHERE creators.fieldMode = 0 \
+                 AND itemCreators.creatorID = ? \
+                 AND itemCreators.creatorTypeID IN (" + AUTHOR_STAT_CREATOR_TYPE_IDS_SQL + ")";
+  const rows = await Zotero.DB.queryAsync(sql, [creatorID]);
+  if (!rows || rows.length === 0) {
+    return 0;
+  }
+  return Number(rows[0].itemCount) || 0;
 }
 
 export function getCreatorMainID(id: number) {
