@@ -1,5 +1,6 @@
 show-author = Show All Items with This Creator
 author-browser-tool-menu-item-label = Author Browser
+author-browser-tool-menu-clear-search = Clear Search by Author
 
 creatorID = Author ID
 firstName = First Name

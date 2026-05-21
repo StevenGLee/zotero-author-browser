@@ -5,6 +5,7 @@
 export type FluentMessageId =
   | 'alias'
   | 'aliasFullNames'
+  | 'author-browser-tool-menu-clear-search'
   | 'author-browser-tool-menu-item-label'
   | 'cancel'
   | 'creatorID'

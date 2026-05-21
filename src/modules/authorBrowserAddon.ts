@@ -25,13 +25,13 @@ export function registerToolsMenuItem() {
   ztoolkit.Menu.register("menuTools", {
     tag: "menuitem",
     id: "author-browser-tool-menu-item",
-    label: getString("author-browser-tool-menu-item-label"),
+    label: getString("tool-menu-item-label"),
     commandListener: (ev) => onDialog(),
   });
   ztoolkit.Menu.register("menuTools", {
     tag: "menuitem",
     id: "author-browser-tool-menu-item",
-    label: getString("author-browser-tool-menu-clear-search"),
+    label: getString("tool-menu-clear-search"),
     commandListener: (ev) => deleteABSavedSearches(),
   });
 }

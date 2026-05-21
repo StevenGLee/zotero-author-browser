@@ -287,9 +287,10 @@ export async function remnameDialog(creatorID: number) {
   addon.data.manager.renameDialog = dialogHelper;
   await dialogData.unloadLock.promise;
   if (dialogData._lastButtonId == "save") {
-    creator.firstName = dialogData.firstName;
-    creator.lastName = dialogData.lastName;
-    creator.save();
+    const fields = Zotero.Creators.get(creatorID);
+    fields.firstName = dialogData.firstName;
+    fields.lastName = dialogData.lastName;
+    await Zotero.Creators.updateCreator(creatorID, fields);
   }
   if (dialogData._lastButtons) addon.data.manager.renameDialog = undefined;
 }

@@ -1,5 +1,6 @@
 show-author = 包含此作者的所有条目
 author-browser-tool-menu-item-label = 作者浏览器
+author-browser-tool-menu-clear-search = 清除作者搜索
 
 creatorID = 作者ID
 firstName = 名
