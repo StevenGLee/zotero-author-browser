@@ -251,20 +251,30 @@ export async function showAuthorByID(id: number) {
 }
 
 export async function showAuthorFromPopupMenu(ev: Event) {
-  let row;
-  let fields;
-  if (ev.target) {
-    row = (ev.target as XULPopupElement).ownerDocument.popupNode.closest(
-      ".meta-row",
-    );
-  } else {
+  const target = ev.target as XULPopupElement | null;
+  const popupNode = target?.ownerDocument?.popupNode as Element | null;
+  if (!popupNode) {
     return;
   }
-  if (ZoteroPane.itemPane) {
-    fields = ZoteroPane.itemPane
-      .querySelector("item-box")
-      .getCreatorFields(row);
+
+  const row = popupNode.closest(".meta-row");
+  if (!row) {
+    return;
   }
+
+  // Prefer the clicked row's own item-box, then fall back to the current pane.
+  const itemBox =
+    (row.closest("item-box") as any) ??
+    (ZoteroPane.itemPane?.querySelector("item-box") as any);
+  if (!itemBox || typeof itemBox.getCreatorFields !== "function") {
+    return;
+  }
+
+  const fields = itemBox.getCreatorFields(row);
+  if (!fields) {
+    return;
+  }
+
   let id: number;
   await Zotero.DB.executeTransaction(async function () {
     id = await Zotero.Creators.getIDFromData({
@@ -273,6 +283,9 @@ export async function showAuthorFromPopupMenu(ev: Event) {
       lastName: fields.lastName,
     });
   });
+  if (typeof id !== "number") {
+    return;
+  }
   id = getCreatorMainID(id);
   showAuthorByID(id);
 }
