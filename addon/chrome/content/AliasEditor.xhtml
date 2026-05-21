@@ -21,7 +21,7 @@
   persist="screenX screenY width height sizemode"
 >
   <head>
-    <title id = "title"></title>
+    <title data-l10n-id="title"></title>
     <meta charset="utf-8" />
     <xul:linkset>
       <link rel="localization" href="browser/menubar.ftl" />
@@ -43,27 +43,23 @@
       />
     </xul:keyset>
     <script>
-      document.addEventListener("DOMContentLoaded", (ev) => {
-        const { Services } = ChromeUtils.import(
-          "resource://gre/modules/Services.jsm",
-        );
-
-        Services.scriptloader.loadSubScript(
-          "chrome://zotero/content/include.js",
-          this,
-        );
+      document.addEventListener("DOMContentLoaded", () => {
+        const scriptLoader = Components.classes[
+          "@mozilla.org/moz/jssubscript-loader;1"
+        ].getService(Components.interfaces.mozIJSSubScriptLoader);
+        scriptLoader.loadSubScript("chrome://zotero/content/include.js", this);
         window.arguments[0]._initPromise.resolve();
       });
     </script>
     <style>
       html,
       body {
-        min-width: 800px;
-        min-height: 400px;
+        min-width: 1024px;
+        min-height: 560px;
       }
+
       html,
-      body,
-      .viewport {
+      body {
         padding: 0;
         margin: 0;
         height: 100%;
@@ -71,77 +67,102 @@
         word-wrap: break-word;
         user-select: none;
       }
-      .viewport {
-        margin: 0 5px 0 5px;
-        overflow-y: auto;
-      }
-      .viewport-container {
-        padding: 0;
-        margin: 0;
-        height: calc(100% - 50px);
-        width: 100%;
+
+      #main-info {
+        box-sizing: border-box;
+        height: 40px;
+        padding: 10px;
         display: flex;
-        flex-direction: row;
+        align-items: center;
+        border-bottom: 1px solid var(--color-border-secondary);
+      }
+
+      #current-main-name {
+        margin-left: 8px;
+        font-weight: 600;
+      }
+
+      .viewport-container {
+        box-sizing: border-box;
+        padding: 10px;
+        margin: 0;
+        height: calc(100% - 136px);
+        width: 100%;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
         overflow: hidden;
         background: var(--material-background);
       }
-      .list-viewport {
-        width: 100%;
+
+      .panel {
+        display: flex;
+        flex-direction: column;
+        border: 1px solid var(--color-border-secondary);
+        border-radius: 6px;
+        min-width: 0;
+      }
+
+      .panel-title {
+        margin: 0;
+        padding: 8px 10px;
+        font-size: 13px;
+        border-bottom: 1px solid var(--color-border-secondary);
+      }
+
+      .table-container {
+        flex: 1;
+        min-height: 0;
         overflow: hidden;
       }
-      #non-alias-table-container {
-        height: 100%;
-        width: 40%;
-        overflow: auto;
-      }
-      #alias-table-container {
-        height: 100%;
-        width: 40%;
-        overflow: auto;
-      }
-      #manager-table {
-        height: 100%;
-      }
-      #alias-pannel {
-        display:flex;
-        justify-content: space-between
-      }
-      #button-container {
-        height: 100%;
-        width: 20%;
-        display:flex;
-        justify-content: space-around
+
+      #action-message {
+        min-width: 220px;
+        margin-left: 10px;
+        font-size: 12px;
+        color: var(--color-text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
       }
     </style>
   </head>
   <body class="zotero-window">
-    <div id="alias-pannel">
-      <div class="viewport-container">
-        <div id="list-container" class="viewport list-viewport">
-          <div id="non-alias-table-container"></div>
-        </div>
-      </div>
-      <div id="button-container">
-      <button id="add" data-l10n-id="refresh"></button>
-      <button id="delete" data-l10n-id="refresh"></button>
-      <button id="save" data-l10n-id="refresh"></button>
-      <button id="cancel" data-l10n-id="refresh"></button>
-
-      </div>
-      <select is="alias-table-container"></select>
+    <div id="main-info">
+      <span data-l10n-id="current-main-label"></span>
+      <span id="current-main-name"></span>
     </div>
-    
+    <div class="viewport-container">
+      <section class="panel">
+        <h2 class="panel-title" data-l10n-id="current-aliases-title"></h2>
+        <div id="current-alias-table-container" class="table-container"></div>
+      </section>
+      <section class="panel">
+        <h2 class="panel-title" data-l10n-id="suggested-aliases-title"></h2>
+        <div id="suggested-table-container" class="table-container"></div>
+      </section>
+    </div>
     <div
       class="footer-container"
       style="justify-content: flex-start; padding: 10px"
       xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
     >
+      <button
+        id="add-selected-suggestions"
+        data-l10n-id="add-selected-suggestions"
+      ></button>
+      <button id="add-all-suggestions" data-l10n-id="add-all-suggestions"></button>
+      <button
+        id="add-browser-selection"
+        data-l10n-id="add-browser-selection"
+      ></button>
+      <button
+        id="restore-selected-aliases"
+        data-l10n-id="restore-selected-aliases"
+      ></button>
       <button id="refresh" data-l10n-id="refresh"></button>
-      <button id="rename" data-l10n-id="rename"></button>
-      <button id="alias" data-l10n-id="alias"></button>
-      <button id="swap" data-l10n-id="swap"></button>
-      <button id="fix-caps" data-l10n-id="fix-caps"></button>
-      <button id="show-item" data-l10n-id="show-item"></button>
+      <button id="close" data-l10n-id="close"></button>
+      <html:div id="action-message"></html:div>
     </div>
   </body>
 </html>

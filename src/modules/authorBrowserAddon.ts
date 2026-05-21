@@ -1,5 +1,5 @@
 /// @ts-nocheck
-import { getString, initLocale } from "../utils/locale";
+import { getString } from "../utils/locale";
 import { onDialog } from "./authorBrowserDialog";
 import { getPref, setPref } from "../utils/prefs";
 
@@ -12,14 +12,72 @@ export interface CreatorDataRow {
   aliasFullNamesString: string;
   itemCount: number;
 }
+
 export interface CreatorQueryDataRow {
   firstName: string;
   lastName: string;
   creatorID: number;
 }
 
+export interface CreatorStatDataRow extends CreatorQueryDataRow {
+  itemCount: number;
+}
+
+interface AuthorAliasGroup {
+  mainID: number;
+  aliasIDs: number[];
+}
+
+interface AuthorAliasState {
+  aliasedCreatorIDs: number[];
+  aliases: AuthorAliasGroup[];
+}
+
+type CreatorSortKey = "firstName" | "lastName" | "itemCount" | "creatorID";
+
+export type AliasMutation =
+  | {
+      type: "add";
+      mainID: number;
+      creatorIDs: number[];
+      mergeGroups?: boolean;
+      dryRun?: boolean;
+    }
+  | {
+      type: "remove";
+      mainID: number;
+      creatorIDs: number[];
+    }
+  | {
+      type: "replace";
+      aliases: AuthorAliasState;
+    };
+
+export interface AliasMutationResult {
+  mainID: number;
+  addedAliasIDs: number[];
+  removedAliasIDs: number[];
+  conflictAliasIDs: number[];
+  skippedAliasIDs: number[];
+  mergedGroupMainIDs: number[];
+  mergedCreatorIDs: number[];
+}
+
 const AUTHOR_STAT_CREATOR_TYPE_IDS = [8, 24, 15];
 const AUTHOR_STAT_CREATOR_TYPE_IDS_SQL = AUTHOR_STAT_CREATOR_TYPE_IDS.join(", ");
+const AUTHOR_ALIAS_PREF_KEY = "author-alias-db";
+const EMPTY_ALIAS_STATE: AuthorAliasState = {
+  aliasedCreatorIDs: [],
+  aliases: [],
+};
+const VALID_SORT_KEYS: CreatorSortKey[] = [
+  "firstName",
+  "lastName",
+  "itemCount",
+  "creatorID",
+];
+
+let authorAliasesLoaded = false;
 
 export function registerToolsMenuItem() {
   ztoolkit.Menu.register("menuTools", {
@@ -29,19 +87,17 @@ export function registerToolsMenuItem() {
     tag: "menuitem",
     id: "author-browser-tool-menu-item",
     label: getString("tool-menu-item-label"),
-    commandListener: (ev) => onDialog(),
+    commandListener: () => onDialog(),
   });
   ztoolkit.Menu.register("menuTools", {
     tag: "menuitem",
     id: "author-browser-tool-menu-item",
     label: getString("tool-menu-clear-search"),
-    commandListener: (ev) => deleteABSavedSearches(),
+    commandListener: () => deleteABSavedSearches(),
   });
 }
 
 export function registerCreatorTransformMenuItem() {
-  // const menuIcon = `chrome://${config.addonRef}/content/icons/favicon@0.5x.png`;
-  // item menuitem with icon
   const menu = ztoolkit.Menu.getGlobal("document").querySelector(
     "#zotero-creator-transform-menu",
   ) as XUL.MenuPopup;
@@ -54,153 +110,354 @@ export function registerCreatorTransformMenuItem() {
       id: "zotero-show-author",
       label: getString("show-author"),
       commandListener: async (ev) => showAuthorFromPopupMenu(ev),
-      // icon: menuIcon,
     });
   }
 }
 
-export async function readCreatorAlias() {
-  addon.data.authorAliases = JSON.parse(
-    getPref("author-alias-db") as string,
-  ) as AuthorAliases;
-  removeInvalidAuthorAliases();
+export function cloneAuthorAliases(source?: AuthorAliasState) {
+  const raw = source || addon.data.authorAliases || createEmptyAliasState();
+  return normalizeAuthorAliases(raw);
+}
+
+export function isCreatorAliased(creatorID: number) {
+  ensureAuthorAliasesLoaded();
+  return addon.data.authorAliases.aliasedCreatorIDs.includes(creatorID);
+}
+
+export function hasAliasGroup(mainID: number) {
+  ensureAuthorAliasesLoaded();
+  const resolvedMainID = resolveMainID(mainID);
+  return getAliasGroupByMainID(resolvedMainID)?.aliasIDs.length > 0;
+}
+
+export function expandGroupForMerge(mainID: number) {
+  ensureAuthorAliasesLoaded();
+  const resolvedMainID = resolveMainID(mainID);
+  if (!isValidCreatorID(resolvedMainID) || !creatorExists(resolvedMainID)) {
+    return [];
+  }
+  const group = getAliasGroupByMainID(resolvedMainID);
+  if (!group) {
+    return [resolvedMainID];
+  }
+  return [resolvedMainID, ...group.aliasIDs];
+}
+
+export async function readCreatorAlias(forceReload = false) {
+  ensureAuthorAliasesLoaded(forceReload);
+  return cloneAuthorAliases();
 }
 
 export async function saveCreatorAlias() {
-  removeInvalidAuthorAliases();
-  setPref("author-alias-db", JSON.stringify(addon.data.authorAliases));
+  ensureAuthorAliasesLoaded();
+  addon.data.authorAliases = normalizeAuthorAliases(addon.data.authorAliases);
+  persistAuthorAliases();
+}
+
+export function resolveMainID(id: number) {
+  ensureAuthorAliasesLoaded();
+  if (!isValidCreatorID(id)) {
+    return -1;
+  }
+  if (!addon.data.authorAliases.aliasedCreatorIDs.includes(id)) {
+    return id;
+  }
+  const alias = addon.data.authorAliases.aliases.find((group) =>
+    group.aliasIDs.includes(id),
+  );
+  return alias ? alias.mainID : id;
 }
 
 export function makeAuthorAlias(mainID: number, aliasID: number) {
+  ensureAuthorAliasesLoaded();
+  if (!isValidCreatorID(mainID) || !isValidCreatorID(aliasID)) {
+    return 5;
+  }
+  const resolvedMainID = resolveMainID(mainID);
+  const resolvedAliasID = resolveMainID(aliasID);
+  if (resolvedMainID <= 0 || resolvedAliasID <= 0) {
+    return 5;
+  }
+  if (resolvedMainID === resolvedAliasID) {
+    return 4;
+  }
+  if (resolvedAliasID !== aliasID) {
+    return 1;
+  }
+  if (hasAliasGroup(aliasID)) {
+    return 3;
+  }
   if (addon.data.authorAliases.aliasedCreatorIDs.includes(aliasID)) {
     return 1;
   }
-  if (addon.data.authorAliases.aliasedCreatorIDs.includes(mainID)) {
-    return 2;
+  const group = getOrCreateAliasGroup(resolvedMainID);
+  if (!group.aliasIDs.includes(aliasID)) {
+    group.aliasIDs.push(aliasID);
   }
-  addon.data.authorAliases.aliasedCreatorIDs.push(aliasID);
-  const alias = addon.data.authorAliases.aliases.filter(
-    (v, i, a) => v.mainID == mainID,
-  );
-  if (alias.length == 0)
-    addon.data.authorAliases.aliases.push({
-      mainID: mainID,
-      aliasIDs: [aliasID],
-    });
-  else alias[0].aliasIDs.push(aliasID);
+  if (!addon.data.authorAliases.aliasedCreatorIDs.includes(aliasID)) {
+    addon.data.authorAliases.aliasedCreatorIDs.push(aliasID);
+  }
+  addon.data.authorAliases = normalizeAuthorAliases(addon.data.authorAliases);
+  persistAuthorAliases();
   return 0;
 }
 
 export function removeAuthorAlias(mainID: number, aliasID: number) {
+  ensureAuthorAliasesLoaded();
+  if (!isValidCreatorID(mainID) || !isValidCreatorID(aliasID)) {
+    return 4;
+  }
+  const resolvedMainID = resolveMainID(mainID);
+  const group = getAliasGroupByMainID(resolvedMainID);
+  if (!group) {
+    return 2;
+  }
   if (!addon.data.authorAliases.aliasedCreatorIDs.includes(aliasID)) {
-    return 1; // aliasID is not an aliased ID.
+    return 1;
   }
-  const mainIndex = addon.data.authorAliases.aliases.findIndex(
-    (v, i, a) => v.mainID == mainID,
-  );
-  if (mainIndex == -1) {
-    return 2; // mainID has no alias
+  if (!group.aliasIDs.includes(aliasID)) {
+    return 3;
   }
-  if (!addon.data.authorAliases.aliases[mainIndex].aliasIDs.includes(aliasID)) {
-    return 3; // aliasID is not an alias of mainID
-  }
+  group.aliasIDs = group.aliasIDs.filter((id) => id !== aliasID);
   addon.data.authorAliases.aliasedCreatorIDs =
-    addon.data.authorAliases.aliasedCreatorIDs.filter(
-      (v, i, n) => v != aliasID,
-    );
-  addon.data.authorAliases.aliases[mainIndex].aliasIDs =
-    addon.data.authorAliases.aliases[mainIndex].aliasIDs.filter(
-      (v, i, n) => v != aliasID,
-    );
+    addon.data.authorAliases.aliasedCreatorIDs.filter((id) => id !== aliasID);
   addon.data.authorAliases.aliases = addon.data.authorAliases.aliases.filter(
-    (v, i, n) => v.aliasIDs.length == 0,
+    (currentGroup) =>
+      currentGroup.mainID !== resolvedMainID || currentGroup.aliasIDs.length > 0,
   );
+  addon.data.authorAliases = normalizeAuthorAliases(addon.data.authorAliases);
+  persistAuthorAliases();
   return 0;
 }
 
-function removeInvalidAuthorAliases() {
-  for (let i = 0; i < addon.data.authorAliases.aliases.length; i++) {
-    const alias = addon.data.authorAliases.aliases[i];
-    for (let j = 0; j < alias.aliasIDs.length; j++) {
-      try {
-        Zotero.Creators.get(alias.aliasIDs[j]);
-        Zotero.Creators.get(alias.mainID);
-      } catch {
-        addon.data.authorAliases.aliases.filter((v, index, a) => index != i);
-        addon.data.authorAliases.aliasedCreatorIDs.filter(
-          (v, index, a) => v != alias.aliasIDs[j],
-        );
+export async function applyAliasMutation(
+  mutation: AliasMutation,
+): Promise<AliasMutationResult> {
+  ensureAuthorAliasesLoaded();
+  const result: AliasMutationResult = {
+    mainID: -1,
+    addedAliasIDs: [],
+    removedAliasIDs: [],
+    conflictAliasIDs: [],
+    skippedAliasIDs: [],
+    mergedGroupMainIDs: [],
+    mergedCreatorIDs: [],
+  };
+  if (!mutation) {
+    return result;
+  }
+
+  if (mutation.type === "replace") {
+    addon.data.authorAliases = normalizeAuthorAliases(mutation.aliases);
+    persistAuthorAliases();
+    return result;
+  }
+
+  const rawMainID = Number(mutation.mainID);
+  const resolvedMainID = resolveMainID(rawMainID);
+  result.mainID = resolvedMainID;
+  if (!isValidCreatorID(resolvedMainID) || !creatorExists(resolvedMainID)) {
+    return result;
+  }
+
+  const mergeGroups = mutation.type === "add" && !!mutation.mergeGroups;
+  const dryRun = mutation.type === "add" && !!mutation.dryRun;
+
+  const creatorIDs = Array.from(
+    new Set((mutation.creatorIDs || []).map((id) => Number(id))),
+  ).filter((id) => isValidCreatorID(id) && creatorExists(id));
+  const conflictSet = new Set<number>();
+  const skippedSet = new Set<number>();
+  const addedSet = new Set<number>();
+  const removedSet = new Set<number>();
+  const mergedGroupSet = new Set<number>();
+  const mergedCreatorSet = new Set<number>();
+  let targetGroup: AuthorAliasGroup | undefined = undefined;
+
+  const maybeAddAliasToTarget = (aliasID: number) => {
+    if (!targetGroup) {
+      targetGroup = getOrCreateAliasGroup(resolvedMainID);
+    }
+    if (aliasID === resolvedMainID) {
+      skippedSet.add(aliasID);
+      return;
+    }
+    if (targetGroup.aliasIDs.includes(aliasID)) {
+      skippedSet.add(aliasID);
+      return;
+    }
+    addedSet.add(aliasID);
+    if (!dryRun) {
+      targetGroup.aliasIDs.push(aliasID);
+      if (!addon.data.authorAliases.aliasedCreatorIDs.includes(aliasID)) {
+        addon.data.authorAliases.aliasedCreatorIDs.push(aliasID);
+      }
+    }
+  };
+
+  const mergeSourceGroup = (sourceMainID: number, markerID: number) => {
+    if (!isValidCreatorID(sourceMainID) || sourceMainID === resolvedMainID) {
+      skippedSet.add(markerID);
+      return;
+    }
+    const sourceMembers = expandGroupForMerge(sourceMainID);
+    if (sourceMembers.length === 0) {
+      skippedSet.add(markerID);
+      return;
+    }
+    mergedGroupSet.add(sourceMainID);
+    for (const memberID of sourceMembers) {
+      if (memberID === resolvedMainID) {
+        continue;
+      }
+      mergedCreatorSet.add(memberID);
+      maybeAddAliasToTarget(memberID);
+    }
+    if (!dryRun) {
+      addon.data.authorAliases.aliases = addon.data.authorAliases.aliases.filter(
+        (group) => group.mainID !== sourceMainID,
+      );
+    }
+  };
+
+  if (mutation.type === "add") {
+    for (const candidateID of creatorIDs) {
+      const candidateMainID = resolveMainID(candidateID);
+      if (candidateMainID === resolvedMainID) {
+        skippedSet.add(candidateID);
+        continue;
+      }
+      if (candidateMainID !== candidateID || hasAliasGroup(candidateID)) {
+        if (!mergeGroups) {
+          conflictSet.add(candidateID);
+          continue;
+        }
+        const sourceMainID =
+          candidateMainID !== candidateID ? candidateMainID : candidateID;
+        mergeSourceGroup(sourceMainID, candidateID);
+        continue;
+      }
+      maybeAddAliasToTarget(candidateID);
+    }
+  } else if (mutation.type === "remove") {
+    const group = getAliasGroupByMainID(resolvedMainID);
+    if (!group) {
+      result.skippedAliasIDs = creatorIDs;
+      return result;
+    }
+    for (const candidateID of creatorIDs) {
+      const existingIndex = group.aliasIDs.indexOf(candidateID);
+      if (existingIndex < 0) {
+        skippedSet.add(candidateID);
+        continue;
+      }
+      removedSet.add(candidateID);
+      if (!dryRun) {
+        group.aliasIDs.splice(existingIndex, 1);
+        addon.data.authorAliases.aliasedCreatorIDs =
+          addon.data.authorAliases.aliasedCreatorIDs.filter(
+            (id) => id !== candidateID,
+          );
       }
     }
   }
+
+  result.addedAliasIDs = Array.from(addedSet);
+  result.removedAliasIDs = Array.from(removedSet);
+  result.mergedGroupMainIDs = Array.from(mergedGroupSet);
+  result.mergedCreatorIDs = Array.from(mergedCreatorSet);
+  result.conflictAliasIDs = Array.from(conflictSet);
+  result.skippedAliasIDs = Array.from(skippedSet);
+
+  if (!dryRun) {
+    addon.data.authorAliases.aliases = addon.data.authorAliases.aliases.filter(
+      (currentGroup) =>
+        currentGroup.mainID !== resolvedMainID || currentGroup.aliasIDs.length > 0,
+    );
+    addon.data.authorAliases = normalizeAuthorAliases(addon.data.authorAliases);
+    persistAuthorAliases();
+  }
+
+  result.conflictAliasIDs = Array.from(conflictSet);
+  return result;
 }
 
-export async function getAllCreators(orderBy: "firstName"|"lastName"|"itemCount"|"creatorID", desc: boolean = false) {
-  const doGetAllCreators = Zotero.Promise.coroutine(function* () {
-    Zotero.DB.requireTransaction();
-    const sql = "SELECT creators.firstName, creators.lastName, creators.creatorID, COUNT(DISTINCT itemCreators.itemID) AS itemCount \
-                 FROM creators \
-                 JOIN itemCreators ON creators.creatorID = itemCreators.creatorID \
-                 WHERE creators.fieldMode = 0 AND itemCreators.creatorTypeID IN (" + AUTHOR_STAT_CREATOR_TYPE_IDS_SQL + ") \
-                 GROUP BY itemCreators.creatorID \
-                 ORDER BY " + orderBy + (desc ? " desc" : "");
-    const result = yield Zotero.DB.queryAsync(sql);
+export async function getAllCreatorStats(
+  orderBy: CreatorSortKey = "itemCount",
+  desc = true,
+) {
+  ensureAuthorAliasesLoaded();
+  return queryCreatorStats(orderBy, desc);
+}
 
-    return result;
-  });
+export async function getAllCreators(
+  orderBy: CreatorSortKey,
+  desc = false,
+): Promise<CreatorDataRow[]> {
+  ensureAuthorAliasesLoaded();
+  const rows = await queryCreatorStats(orderBy, desc);
+  const countMap = new Map<number, number>();
+  const nameMap = new Map<number, { firstName: string; lastName: string }>();
+  for (const row of rows) {
+    countMap.set(row.creatorID, row.itemCount);
+    nameMap.set(row.creatorID, {
+      firstName: row.firstName,
+      lastName: row.lastName,
+    });
+  }
 
   const creators: CreatorDataRow[] = [];
-  let rows;
-  await Zotero.DB.executeTransaction(async function () {
-    rows = await doGetAllCreators();
-    for (let i = 0; i < rows.length; i++) {
-      if(rows[i].itemCount == 0)
+  for (const row of rows) {
+    if (row.itemCount <= 0) {
+      continue;
+    }
+    if (addon.data.authorAliases.aliasedCreatorIDs.includes(row.creatorID)) {
+      continue;
+    }
+    creators.push({
+      firstName: row.firstName,
+      lastName: row.lastName,
+      creatorID: row.creatorID,
+      itemCount: row.itemCount,
+      aliasIDs: getAllAliasByMainID(row.creatorID),
+      aliasFullNames: [],
+      aliasFullNamesString: "",
+    });
+  }
+
+  for (const creator of creators) {
+    const aliases = getAllAliasByMainID(creator.creatorID);
+    for (const aliasID of aliases) {
+      const aliasName = nameMap.get(aliasID) || readCreatorName(aliasID);
+      if (!aliasName) {
         continue;
-      if (
-        !addon.data.authorAliases.aliasedCreatorIDs.includes(rows[i].creatorID)
-      ) {
-        creators.push({
-          firstName: rows[i].firstName,
-          lastName: rows[i].lastName,
-          creatorID: rows[i].creatorID,
-          itemCount: rows[i].itemCount,
-          aliasIDs: getAllAliasByMainID(rows[i].creatorID),
-          aliasFullNames: [],
-          aliasFullNamesString: "",
-        });
+      }
+      const fullName = formatFullName(aliasName.firstName, aliasName.lastName);
+      if (fullName) {
+        creator.aliasFullNames.push(fullName);
+      }
+      if (countMap.has(aliasID)) {
+        creator.itemCount += countMap.get(aliasID) || 0;
+      } else {
+        creator.itemCount += await countCreatorItemsForAuthorStats(aliasID);
       }
     }
-  });
-  removeInvalidAuthorAliases();
-  for (let i = 0; i < addon.data.authorAliases.aliases.length; i++) {
-    const alias = addon.data.authorAliases.aliases[i];
-    const mainIndex = creators.findIndex(
-      (v2, i2, a2) => v2.creatorID == alias.mainID,
-    );
-    for (let j = 0; j < alias.aliasIDs.length; j++) {
-      const aliasCreator = Zotero.Creators.get(alias.aliasIDs[j]);
-      creators[mainIndex].aliasFullNames.push(
-        aliasCreator.firstName + " " + aliasCreator.lastName,
-      );
-      creators[mainIndex].aliasFullNamesString +=
-        aliasCreator.firstName + " " + aliasCreator.lastName;
-      if (i < addon.data.authorAliases.aliases.length - 1)
-        creators[mainIndex].aliasFullNamesString += ", ";
-      creators[mainIndex].itemCount +=
-        await countCreatorItemsForAuthorStats(alias.aliasIDs[j]);
-    }
+    creator.aliasFullNamesString = creator.aliasFullNames.join(", ");
   }
 
   return creators;
 }
 
 async function countCreatorItemsForAuthorStats(creatorID: number) {
-  const sql = "SELECT COUNT(DISTINCT itemCreators.itemID) AS itemCount \
+  const sql =
+    "SELECT COUNT(DISTINCT itemCreators.itemID) AS itemCount \
                FROM itemCreators \
                JOIN creators ON creators.creatorID = itemCreators.creatorID \
                WHERE creators.fieldMode = 0 \
                  AND itemCreators.creatorID = ? \
-                 AND itemCreators.creatorTypeID IN (" + AUTHOR_STAT_CREATOR_TYPE_IDS_SQL + ")";
+                 AND itemCreators.creatorTypeID IN (" +
+    AUTHOR_STAT_CREATOR_TYPE_IDS_SQL +
+    ")";
   const rows = await Zotero.DB.queryAsync(sql, [creatorID]);
   if (!rows || rows.length === 0) {
     return 0;
@@ -209,44 +466,48 @@ async function countCreatorItemsForAuthorStats(creatorID: number) {
 }
 
 export function getCreatorMainID(id: number) {
-  if (!addon.data.authorAliases.aliasedCreatorIDs.includes(id)) return id;
-  const aliases = addon.data.authorAliases.aliases.filter((v, i, a) =>
-    v.aliasIDs.includes(id),
-  );
-  return aliases[0].mainID;
+  ensureAuthorAliasesLoaded();
+  return resolveMainID(id);
 }
 
 export function getAllAliasByMainID(mainID: number) {
-  const alias = addon.data.authorAliases.aliases.filter(
-    (v, i, a) => v.mainID == mainID,
+  ensureAuthorAliasesLoaded();
+  const resolvedMainID = resolveMainID(mainID);
+  const alias = addon.data.authorAliases.aliases.find(
+    (group) => group.mainID === resolvedMainID,
   );
-  if (alias.length) return alias[0].aliasIDs;
-  else return [];
+  if (!alias) {
+    return [];
+  }
+  return [...alias.aliasIDs];
 }
 
 export async function showAuthorByID(id: number) {
-  const creator = Zotero.Creators.get(id);
-  const fullName = creator.firstName + " " + creator.lastName;
+  ensureAuthorAliasesLoaded();
+  const mainID = resolveMainID(id);
+  const creator = Zotero.Creators.get(mainID);
+  if (!creator) {
+    return;
+  }
+  const fullName = formatFullName(creator.firstName, creator.lastName);
   const s = new Zotero.Search({
     name: fullName,
     libraryID: Zotero.Libraries.userLibraryID,
   });
   s.addCondition("joinMode", "any");
-  s.addCondition("creator", "is", creator.firstName + " " + creator.lastName);
-  const alias = addon.data.authorAliases.aliases.filter(
-    (v, i, a) => v.mainID == id,
-  );
-  if (alias.length != 0)
-    alias[0].aliasIDs.forEach((v, i, a) => {
-      const aliasCreator = Zotero.Creators.get(v);
-      s.addCondition(
-        "creator",
-        "is",
-        aliasCreator.firstName + " " + aliasCreator.lastName,
-      );
-    });
-  //addAuthorSearchAndSelect(s);
-  //showSearchToItemsView(s);
+  s.addCondition("creator", "is", fullName);
+  const aliases = getAllAliasByMainID(mainID);
+  for (const aliasID of aliases) {
+    const aliasCreator = Zotero.Creators.get(aliasID);
+    if (!aliasCreator) {
+      continue;
+    }
+    const aliasFullName = formatFullName(
+      aliasCreator.firstName,
+      aliasCreator.lastName,
+    );
+    s.addCondition("creator", "is", aliasFullName);
+  }
   saveSearchAndSelect(s);
 }
 
@@ -262,7 +523,6 @@ export async function showAuthorFromPopupMenu(ev: Event) {
     return;
   }
 
-  // Prefer the clicked row's own item-box, then fall back to the current pane.
   const itemBox =
     (row.closest("item-box") as any) ??
     (ZoteroPane.itemPane?.querySelector("item-box") as any);
@@ -286,9 +546,10 @@ export async function showAuthorFromPopupMenu(ev: Event) {
   if (typeof id !== "number") {
     return;
   }
-  id = getCreatorMainID(id);
+  id = resolveMainID(id);
   showAuthorByID(id);
 }
+
 export async function deleteABSavedSearches() {
   const savedSearches = await Zotero.Searches.getAll(
     Zotero.Libraries.userLibraryID,
@@ -299,6 +560,167 @@ export async function deleteABSavedSearches() {
   for (let i = 0; i < savedSearches.length; i++) {
     savedSearches[i].eraseTx();
   }
+}
+
+async function queryCreatorStats(orderBy: CreatorSortKey, desc: boolean) {
+  const safeSortKey = VALID_SORT_KEYS.includes(orderBy) ? orderBy : "itemCount";
+  const sql =
+    "SELECT creators.firstName, creators.lastName, creators.creatorID, COUNT(DISTINCT itemCreators.itemID) AS itemCount \
+                 FROM creators \
+                 JOIN itemCreators ON creators.creatorID = itemCreators.creatorID \
+                 WHERE creators.fieldMode = 0 AND itemCreators.creatorTypeID IN (" +
+    AUTHOR_STAT_CREATOR_TYPE_IDS_SQL +
+    ") \
+                 GROUP BY itemCreators.creatorID \
+                 ORDER BY " +
+    safeSortKey +
+    (desc ? " desc" : "");
+
+  let rows: any[] = [];
+  await Zotero.DB.executeTransaction(async function () {
+    rows = await Zotero.DB.queryAsync(sql);
+  });
+
+  return (rows || []).map((row) => ({
+    firstName: row.firstName || "",
+    lastName: row.lastName || "",
+    creatorID: Number(row.creatorID) || -1,
+    itemCount: Number(row.itemCount) || 0,
+  })) as CreatorStatDataRow[];
+}
+
+function ensureAuthorAliasesLoaded(forceReload = false) {
+  if (forceReload) {
+    authorAliasesLoaded = false;
+  }
+  if (authorAliasesLoaded) {
+    return;
+  }
+  const rawValue = getPref(AUTHOR_ALIAS_PREF_KEY);
+  let parsedValue: any = undefined;
+  if (typeof rawValue === "string" && rawValue.trim()) {
+    try {
+      parsedValue = JSON.parse(rawValue);
+    } catch (e) {
+      parsedValue = undefined;
+    }
+  }
+  const normalized = normalizeAuthorAliases(parsedValue);
+  addon.data.authorAliases = normalized;
+  authorAliasesLoaded = true;
+  const normalizedSerialized = JSON.stringify(normalized);
+  if (rawValue !== normalizedSerialized) {
+    setPref(AUTHOR_ALIAS_PREF_KEY, normalizedSerialized);
+  }
+}
+
+function persistAuthorAliases() {
+  const normalized = normalizeAuthorAliases(addon.data.authorAliases);
+  addon.data.authorAliases = normalized;
+  setPref(AUTHOR_ALIAS_PREF_KEY, JSON.stringify(normalized));
+}
+
+function normalizeAuthorAliases(rawValue: any): AuthorAliasState {
+  const normalized = createEmptyAliasState();
+  if (!rawValue || !Array.isArray(rawValue.aliases)) {
+    return normalized;
+  }
+
+  const aliasedSet = new Set<number>();
+  for (const rawGroup of rawValue.aliases) {
+    const mainID = Number(rawGroup?.mainID);
+    if (!isValidCreatorID(mainID) || !creatorExists(mainID)) {
+      continue;
+    }
+    if (aliasedSet.has(mainID)) {
+      continue;
+    }
+    const rawAliasIDs = Array.isArray(rawGroup?.aliasIDs)
+      ? rawGroup.aliasIDs
+      : [];
+    const aliasIDs: number[] = [];
+    for (const rawAliasID of rawAliasIDs) {
+      const aliasID = Number(rawAliasID);
+      if (!isValidCreatorID(aliasID) || aliasID === mainID) {
+        continue;
+      }
+      if (!creatorExists(aliasID)) {
+        continue;
+      }
+      if (aliasedSet.has(aliasID)) {
+        continue;
+      }
+      if (aliasIDs.includes(aliasID)) {
+        continue;
+      }
+      aliasIDs.push(aliasID);
+      aliasedSet.add(aliasID);
+    }
+    if (aliasIDs.length > 0) {
+      normalized.aliases.push({
+        mainID,
+        aliasIDs,
+      });
+    }
+  }
+  normalized.aliasedCreatorIDs = Array.from(aliasedSet);
+  return normalized;
+}
+
+function createEmptyAliasState(): AuthorAliasState {
+  return {
+    aliasedCreatorIDs: [...EMPTY_ALIAS_STATE.aliasedCreatorIDs],
+    aliases: [],
+  };
+}
+
+function getOrCreateAliasGroup(mainID: number) {
+  let group = getAliasGroupByMainID(mainID);
+  if (!group) {
+    group = {
+      mainID,
+      aliasIDs: [],
+    };
+    addon.data.authorAliases.aliases.push(group);
+  }
+  return group;
+}
+
+export function getAliasGroupByMainID(mainID: number) {
+  return addon.data.authorAliases.aliases.find((group) => group.mainID === mainID);
+}
+
+function readCreatorName(creatorID: number) {
+  const creator = Zotero.Creators.get(creatorID);
+  if (!creator) {
+    return undefined;
+  }
+  return {
+    firstName: creator.firstName || "",
+    lastName: creator.lastName || "",
+  };
+}
+
+function creatorExists(creatorID: number) {
+  if (!isValidCreatorID(creatorID)) {
+    return false;
+  }
+  try {
+    const creator = Zotero.Creators.get(creatorID);
+    return !!creator;
+  } catch (e) {
+    return false;
+  }
+}
+
+function isValidCreatorID(creatorID: number) {
+  return Number.isInteger(creatorID) && creatorID > 0;
+}
+
+function formatFullName(firstName: string, lastName: string) {
+  const cleanFirstName = (firstName || "").trim();
+  const cleanLastName = (lastName || "").trim();
+  return `${cleanFirstName} ${cleanLastName}`.trim();
 }
 
 async function showSearchToItemsView(s: Zotero.Search) {
@@ -341,7 +763,7 @@ function saveSearchAndSelect(s: Zotero.Search) {
   s.saveTx();
   const savedSearches = Zotero.Searches.getAll(
     Zotero.Libraries.userLibraryID,
-  ).filter((s) => !s.deleted);
+  ).filter((item) => !item.deleted);
   for (let i = 0; i < savedSearches.length; i++) {
     if (savedSearches[i].name == s.name) {
       ZoteroPane.collectionsView.selectItem(savedSearches[i].id);

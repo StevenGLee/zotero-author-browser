@@ -2,7 +2,7 @@ import { VirtualizedTableHelper } from "zotero-plugin-toolkit/dist/helpers/virtu
 import { DialogHelper } from "zotero-plugin-toolkit/dist/helpers/dialog";
 import hooks from "./hooks";
 import { createZToolkit } from "./utils/ztoolkit";
-import { CreatorDataRow } from "./modules/authorBrowserAddon";
+import { CreatorDataRow, CreatorStatDataRow } from "./modules/authorBrowserAddon";
 
 export interface AuthorAliases {
   aliasedCreatorIDs: Array<number>;
@@ -30,12 +30,34 @@ class Addon {
       renameDialog?;
       aliasEditor: {
         window?: Window;
-        nonAliastableHelper?: VirtualizedTableHelper;
-        aliastableHelper?: VirtualizedTableHelper;
-        nonAliasTableData: CreatorDataRow[];
-        aliasTableData: number[];
+        mainTableHelper?: VirtualizedTableHelper;
+        suggestedTableHelper?: VirtualizedTableHelper;
+        currentAliasTableHelper?: VirtualizedTableHelper;
+        mainTableData: CreatorDataRow[];
+        allCreatorStats: CreatorStatDataRow[];
+        suggestedRows: Array<{
+          creatorID: number;
+          firstName: string;
+          lastName: string;
+          itemCount: number;
+          matchReason: string;
+          matchPriority: number;
+          status: string;
+          blockedByMainID: number;
+        }>;
+        currentAliasRows: Array<{
+          creatorID: number;
+          firstName: string;
+          lastName: string;
+          itemCount: number;
+        }>;
         columnIndex: number;
         columnAscending: boolean;
+        selectedMainID: number;
+        undoStack: AuthorAliases[];
+        redoStack: AuthorAliases[];
+        message: string;
+        updatingMainSelection: boolean;
       };
     };
     authorAliases: AuthorAliases;
@@ -55,10 +77,17 @@ class Addon {
         columnAscending: false,
         columnIndex: 2,
         aliasEditor: {
-          nonAliasTableData: [],
-          aliasTableData: [],
+          mainTableData: [],
+          allCreatorStats: [],
+          suggestedRows: [],
+          currentAliasRows: [],
           columnIndex: 0,
           columnAscending: true,
+          selectedMainID: -1,
+          undoStack: [],
+          redoStack: [],
+          message: "",
+          updatingMainSelection: false,
         },
       },
       authorAliases: {

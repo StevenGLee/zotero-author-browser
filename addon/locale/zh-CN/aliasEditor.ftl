@@ -1,0 +1,23 @@
+title = 别名管理器
+current-main-label = 当前主作者：
+suggested-aliases-title = 建议别名
+current-aliases-title = 当前别名
+
+add-selected-suggestions =
+    .label = 添加选中的建议别名
+    .tooltiptext = 将建议列表中选中的作者添加为当前主作者的别名
+add-all-suggestions =
+    .label = 添加全部建议别名
+    .tooltiptext = 将建议列表中的全部作者添加为当前主作者的别名
+add-browser-selection =
+    .label = 添加作者浏览器选中作者
+    .tooltiptext = 将作者浏览器中当前选中的作者添加为当前主作者的别名
+restore-selected-aliases =
+    .label = 将选中的别名恢复为主条目
+    .tooltiptext = 将选中的别名从当前主作者中移除并恢复为主条目
+refresh =
+    .label = 刷新
+    .tooltiptext = 刷新别名管理器数据
+close =
+    .label = 关闭
+    .tooltiptext = 关闭别名管理器

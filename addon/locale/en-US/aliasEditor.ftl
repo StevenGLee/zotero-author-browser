@@ -1,0 +1,23 @@
+title = Alias Manager
+current-main-label = Current Main Author:
+suggested-aliases-title = Suggested Aliases
+current-aliases-title = Current Aliases
+
+add-selected-suggestions =
+    .label = Add Selected Suggestions
+    .tooltiptext = Add selected rows from suggested aliases to current main author
+add-all-suggestions =
+    .label = Add All Suggestions
+    .tooltiptext = Add all suggested aliases to current main author
+add-browser-selection =
+    .label = Add Author Browser Selection
+    .tooltiptext = Add the currently selected author in Author Browser as alias of current main author
+restore-selected-aliases =
+    .label = Restore Selected Aliases
+    .tooltiptext = Remove selected aliases from current main author and restore them as main entries
+refresh =
+    .label = Refresh
+    .tooltiptext = Refresh alias manager data
+close =
+    .label = Close
+    .tooltiptext = Close alias manager

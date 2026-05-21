@@ -43,20 +43,11 @@
       />
     </xul:keyset>
     <script>
-      document.addEventListener("DOMContentLoaded", (ev) => {
-        try {
-          const { Services } = ChromeUtils.import(
-            "resource://gre/modules/Services.jsm",
-          );
-          console.log("Services loaded:", Services);
-        } catch (error) {
-          console.error("Error loading Services:", error);
-        }
-
-        Services.scriptloader.loadSubScript(
-          "chrome://zotero/content/include.js",
-          this,
-        );
+      document.addEventListener("DOMContentLoaded", () => {
+        const scriptLoader = Components.classes[
+          "@mozilla.org/moz/jssubscript-loader;1"
+        ].getService(Components.interfaces.mozIJSSubScriptLoader);
+        scriptLoader.loadSubScript("chrome://zotero/content/include.js", this);
         window.arguments[0]._initPromise.resolve();
       });
     </script>

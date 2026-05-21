@@ -1,19 +1,17 @@
 /// @ts-nocheck
 import { config } from "../../package.json";
-import { getLocaleID, getString } from "../utils/locale";
+import { getString } from "../utils/locale";
 import { isWindowAlive } from "../utils/window";
 import {
   showAuthorByID,
-  CreatorDataRow,
   getAllCreators,
 } from "./authorBrowserAddon";
+import { onDialog as onAliasEditorDialog } from "./aliasEditor";
 
 export async function onDialog() {
-  refresh();
-
   if (isWindowAlive(addon.data.manager.window)) {
     addon.data.manager.window?.focus();
-    // refresh();
+    await refresh();
   } else {
     const windowArgs = {
       _initPromise: Zotero.Promise.defer(),
@@ -73,6 +71,7 @@ export async function onDialog() {
         firstName: addon.data.manager.data[index].firstName,
         lastName: addon.data.manager.data[index].lastName,
         itemCount: String(addon.data.manager.data[index].itemCount),
+        aliasFullNames: addon.data.manager.data[index].aliasFullNamesString,
       }))
       .setProp("onSelectionChange", (selection) => {
         updateButtons();
@@ -103,29 +102,35 @@ export async function onDialog() {
     const showItemsButton = win.document.querySelector(
       "#show-item",
     ) as HTMLButtonElement;
-    refreshButton.addEventListener("click", (ev) => {
+    refreshButton.addEventListener("click", () => {
       refresh();
     });
-    renameButton.addEventListener("click", async (ev) => {
+    renameButton.addEventListener("click", async () => {
       const creatorID = getSelectedNoteIds();
+      if (creatorID <= 0) {
+        return;
+      }
       await remnameDialog(creatorID);
       refresh();
     });
-    aliasButton.disabled = true;
-    aliasButton.addEventListener("click", (ev) => {
-      refresh();
+    aliasButton.addEventListener("click", async () => {
+      await openAliasManagerForSelection();
     });
-    swapButton.addEventListener("click", () => {
+    swapButton.addEventListener("click", async () => {
       const creatorID = getSelectedNoteIds();
-      swapNames(creatorID);
-      refresh();
+      await swapNames(creatorID);
+      await refresh();
     });
-    fixCapssButton.addEventListener("click", () => {
-      capitalizeCreatorName();
+    fixCapssButton.addEventListener("click", async () => {
+      await capitalizeCreatorName();
     });
     showItemsButton.addEventListener("click", () => {
-      showAuthorByID(getSelectedNoteIds());
+      const creatorID = getSelectedNoteIds();
+      if (creatorID > 0) {
+        showAuthorByID(creatorID);
+      }
     });
+    await refresh();
   }
 }
 
@@ -137,20 +142,18 @@ async function quickSort() {
     if (!a || !b) {
       return 0;
     }
-    if(sortKey == "itemCount" || sortKey == "creatorID")
-    {
+    if (sortKey == "itemCount" || sortKey == "creatorID") {
       const valueA = Number(a[sortKey] || 0);
-    const valueB = Number(b[sortKey] || 0);
-    return addon.data.manager.columnAscending
-      ? valueA>valueB
-      : valueB>valueA;
-    }
-    else{
-    const valueA = String(a[sortKey] || "");
-    const valueB = String(b[sortKey] || "");
-    return addon.data.manager.columnAscending
-      ? valueA.localeCompare(valueB)
-      : valueB.localeCompare(valueA);
+      const valueB = Number(b[sortKey] || 0);
+      return addon.data.manager.columnAscending
+        ? valueA - valueB
+        : valueB - valueA;
+    } else {
+      const valueA = String(a[sortKey] || "");
+      const valueB = String(b[sortKey] || "");
+      return addon.data.manager.columnAscending
+        ? valueA.localeCompare(valueB)
+        : valueB.localeCompare(valueA);
     }
   });
   await updateTable();
@@ -159,25 +162,43 @@ async function quickSort() {
 
 async function updateData() {
   const sortKey = sortDataKeys[addon.data.manager.columnIndex];
-  addon.data.manager.data = (await getAllCreators(sortKey, addon.data.manager.columnAscending == false));
+  addon.data.manager.data = await getAllCreators(
+    sortKey,
+    addon.data.manager.columnAscending == false,
+  );
 }
 function updateButtons() {
   const win = addon.data.manager.window;
   if (!win) {
     return;
   }
+  const creatorID = getSelectedNoteIds();
   const fixCapssButton = win.document.querySelector(
     "#fix-caps",
   ) as HTMLButtonElement;
-  if (canCapitalizeCreatorName(getSelectedNoteIds())) {
-    fixCapssButton.disabled = false;
-  } else {
-    fixCapssButton.disabled = true;
-  }
+  const aliasButton = win.document.querySelector("#alias") as HTMLButtonElement;
+  const renameButton = win.document.querySelector(
+    "#rename",
+  ) as HTMLButtonElement;
+  const swapButton = win.document.querySelector("#swap") as HTMLButtonElement;
+  const showItemsButton = win.document.querySelector(
+    "#show-item",
+  ) as HTMLButtonElement;
+
+  renameButton.disabled = creatorID <= 0;
+  aliasButton.disabled = creatorID <= 0;
+  swapButton.disabled = creatorID <= 0;
+  showItemsButton.disabled = creatorID <= 0;
+  fixCapssButton.disabled =
+    creatorID <= 0 || !canCapitalizeCreatorName(creatorID);
 }
 async function updateTable() {
   return new Promise<void>((resolve) => {
-    addon.data.manager.tableHelper?.render(undefined, (_) => {
+    if (!addon.data.manager.tableHelper) {
+      resolve();
+      return;
+    }
+    addon.data.manager.tableHelper.render(undefined, (_) => {
       resolve();
     });
   });
@@ -188,24 +209,92 @@ async function refresh() {
   updateButtons();
 }
 function getSelectedNoteIds() {
-  let id: number = -1;
-  for (const idx of addon.data.manager.tableHelper?.treeInstance.selection.selected?.keys() ||
-    []) {
-    id = addon.data.manager.data[idx].creatorID;
+  const indices = getSelectedIndices(addon.data.manager.tableHelper);
+  if (indices.length === 0) {
+    return -1;
+  }
+  let id = -1;
+  for (const idx of indices) {
+    if (idx >= 0 && idx < addon.data.manager.data.length) {
+      id = addon.data.manager.data[idx].creatorID;
+    }
   }
   return id;
 }
+
+function getSelectedIndices(tableHelper: any): number[] {
+  const selectedRaw = tableHelper?.treeInstance?.selection?.selected;
+  if (!selectedRaw) {
+    return [];
+  }
+  if (Array.isArray(selectedRaw)) {
+    return selectedRaw
+      .map((v) => Number(v))
+      .filter((v) => Number.isInteger(v) && v >= 0);
+  }
+  if (selectedRaw instanceof Set) {
+    return Array.from(selectedRaw)
+      .map((v) => Number(v))
+      .filter((v) => Number.isInteger(v) && v >= 0);
+  }
+  if (selectedRaw instanceof Map) {
+    return Array.from(selectedRaw.keys())
+      .map((v) => Number(v))
+      .filter((v) => Number.isInteger(v) && v >= 0);
+  }
+  if (typeof selectedRaw.values === "function") {
+    const values = Array.from(selectedRaw.values());
+    if (values.length > 0) {
+      const parsed = values
+        .map((v) => Number(v))
+        .filter((v) => Number.isInteger(v) && v >= 0);
+      if (parsed.length > 0) {
+        return parsed;
+      }
+    }
+  }
+  if (typeof selectedRaw.keys === "function") {
+    return Array.from(selectedRaw.keys())
+      .map((v) => Number(v))
+      .filter((v) => Number.isInteger(v) && v >= 0);
+  }
+  return [];
+}
+
+export function getCurrentSelectedCreatorID() {
+  return getSelectedNoteIds();
+}
+
+export async function openAliasManagerForSelection() {
+  const creatorID = getSelectedNoteIds();
+  if (creatorID <= 0) {
+    return;
+  }
+  await onAliasEditorDialog(creatorID);
+}
 async function swapNames(creatorID: number) {
+  if (creatorID <= 0) {
+    return;
+  }
   const fields = Zotero.Creators.get(creatorID);
+  if (!fields) {
+    return;
+  }
   const lastName = fields.lastName;
   const firstName = fields.firstName;
   fields.lastName = firstName;
   fields.firstName = lastName;
-  Zotero.Creators.updateCreator(creatorID, fields);
+  await Zotero.Creators.updateCreator(creatorID, fields);
 }
 
 function canCapitalizeCreatorName(creatorID: number) {
+  if (creatorID <= 0) {
+    return false;
+  }
   const fields = Zotero.Creators.get(creatorID);
+  if (!fields) {
+    return false;
+  }
   return (
     (fields.firstName &&
       Zotero.Utilities.capitalizeName(fields.firstName) != fields.firstName) ||
@@ -216,14 +305,27 @@ function canCapitalizeCreatorName(creatorID: number) {
 
 async function capitalizeCreatorName() {
   const creatorID = getSelectedNoteIds();
+  if (creatorID <= 0) {
+    return;
+  }
   const fields = Zotero.Creators.get(creatorID);
+  if (!fields) {
+    return;
+  }
   fields.lastName = Zotero.Utilities.capitalizeName(fields.lastName);
   fields.firstName = Zotero.Utilities.capitalizeName(fields.firstName);
-  Zotero.Creators.updateCreator(creatorID, fields);
+  await Zotero.Creators.updateCreator(creatorID, fields);
+  await refresh();
 }
 
 export async function remnameDialog(creatorID: number) {
+  if (creatorID <= 0) {
+    return;
+  }
   const creator = Zotero.Creators.get(creatorID);
+  if (!creator) {
+    return;
+  }
   const dialogData: { [key: string | number]: any } = {
     creatorID: creatorID,
     firstName: creator.firstName,
@@ -293,4 +395,11 @@ export async function remnameDialog(creatorID: number) {
     await Zotero.Creators.updateCreator(creatorID, fields);
   }
   if (dialogData._lastButtons) addon.data.manager.renameDialog = undefined;
+}
+
+export async function refreshIfOpen() {
+  if (!isWindowAlive(addon.data.manager.window)) {
+    return;
+  }
+  await refresh();
 }
