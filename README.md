@@ -3,13 +3,13 @@
 [![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
-Zotero Author Browser helps you browse creators, inspect author coverage, and manage author aliases in a Zotero library.
+Zotero Author Browser helps you browse creators, inspect author coverage, manage author aliases, and jump to external author search pages.
 
 [English](README.md) | [Simplified Chinese](README-zhCN.md)
 
 ## Current Status
 
-The plugin is actively developed and now supports a working **Alias Manager** with real author alias operations.
+The plugin is actively developed and now supports a working **Alias Manager** plus external author search in **Google Scholar** and **CNKI**.
 
 ## Implemented Features
 
@@ -17,6 +17,17 @@ The plugin is actively developed and now supports a working **Alias Manager** wi
   - Added to the creator context menu in Zotero's right sidebar.
   - Also available from Author Browser row activation.
   - Alias-aware: when a creator is aliased, results include the main author and all aliases.
+- **External Author Search**
+  - **Search in Google Scholar**
+    - Available in the creator context menu (right sidebar).
+    - Available in Author Browser (`allAuthorWindow`) via footer button and row right-click menu.
+  - **Search in CNKI**
+    - Available in the creator context menu (right sidebar).
+    - Available in Author Browser (`allAuthorWindow`) via footer button and row right-click menu.
+  - Alias-aware: external searches resolve to the main author when aliases exist.
+  - CJK-aware name formatting for external searches.
+    - CJK names use `lastName+firstName` (no space), e.g. `张三`.
+    - Non-CJK names use `firstName lastName`.
 - **Author Browser**
   - Lists creators with item counts.
   - Supports sort, rename, swap first/last name, and capitalization fix.

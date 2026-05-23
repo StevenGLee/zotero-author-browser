@@ -15,3 +15,14 @@ fix-caps =
 show-item = 
     .label = 作者条目
     .tooltiptext = 包含此作者的所有条目
+search-scholar = 
+    .label = 在 Scholar 中搜索
+    .tooltiptext = 在 Google Scholar 中搜索该作者
+search-scholar-context = 
+    .label = 在 Google Scholar 中搜索
+
+search-cnki = 
+    .label = 在 CNKI 中搜索
+    .tooltiptext = 在 CNKI 中搜索该作者
+search-cnki-context = 
+    .label = 在 CNKI 中搜索

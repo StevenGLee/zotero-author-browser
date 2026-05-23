@@ -1,4 +1,6 @@
 show-author = Show All Items with This Creator
+search-author-google-scholar = Search This Author in Google Scholar
+search-author-cnki = Search This Author in CNKI
 author-browser-tool-menu-item-label = Author Browser
 author-browser-tool-menu-clear-search = Clear Search by Author
 

@@ -66,6 +66,8 @@ export interface AliasMutationResult {
 const AUTHOR_STAT_CREATOR_TYPE_IDS = [8, 24, 15];
 const AUTHOR_STAT_CREATOR_TYPE_IDS_SQL = AUTHOR_STAT_CREATOR_TYPE_IDS.join(", ");
 const AUTHOR_ALIAS_PREF_KEY = "author-alias-db";
+const GOOGLE_SCHOLAR_SEARCH_URL = "https://scholar.google.com/scholar";
+const CNKI_SEARCH_URL = "https://kns.cnki.net/kns8s/defaultresult/index";
 const EMPTY_ALIAS_STATE: AuthorAliasState = {
   aliasedCreatorIDs: [],
   aliases: [],
@@ -110,6 +112,18 @@ export function registerCreatorTransformMenuItem() {
       id: "zotero-show-author",
       label: getString("show-author"),
       commandListener: async (ev) => showAuthorFromPopupMenu(ev),
+    });
+    ztoolkit.Menu.register(menu, {
+      tag: "menuitem",
+      id: "zotero-search-author-google-scholar",
+      label: getString("search-author-google-scholar"),
+      commandListener: async (ev) => searchAuthorInGoogleScholarFromPopupMenu(ev),
+    });
+    ztoolkit.Menu.register(menu, {
+      tag: "menuitem",
+      id: "zotero-search-author-cnki",
+      label: getString("search-author-cnki"),
+      commandListener: async (ev) => searchAuthorInCNKIFromPopupMenu(ev),
     });
   }
 }
@@ -512,42 +526,232 @@ export async function showAuthorByID(id: number) {
 }
 
 export async function showAuthorFromPopupMenu(ev: Event) {
-  const target = ev.target as XULPopupElement | null;
-  const popupNode = target?.ownerDocument?.popupNode as Element | null;
-  if (!popupNode) {
+  const id = await resolveCreatorIDFromPopupMenuEvent(ev);
+  if (id <= 0) {
     return;
   }
+  showAuthorByID(id);
+}
 
-  const row = popupNode.closest(".meta-row");
-  if (!row) {
+export async function searchAuthorInGoogleScholarByID(id: number) {
+  ensureAuthorAliasesLoaded();
+  const mainID = resolveMainID(id);
+  const creator = Zotero.Creators.get(mainID);
+  if (!creator) {
     return;
   }
-
-  const itemBox =
-    (row.closest("item-box") as any) ??
-    (ZoteroPane.itemPane?.querySelector("item-box") as any);
-  if (!itemBox || typeof itemBox.getCreatorFields !== "function") {
+  const fullName = formatScholarAuthorName(creator.firstName, creator.lastName);
+  if (!fullName) {
     return;
   }
+  const query = `author:"${fullName}"`;
+  const url = `${GOOGLE_SCHOLAR_SEARCH_URL}?q=${encodeURIComponent(query)}`;
+  Zotero.launchURL(url);
+}
 
-  const fields = itemBox.getCreatorFields(row);
+export async function searchAuthorInGoogleScholarFromPopupMenu(ev: Event) {
+  const id = await resolveCreatorIDFromPopupMenuEvent(ev);
+  if (id <= 0) {
+    return;
+  }
+  searchAuthorInGoogleScholarByID(id);
+}
+
+export async function searchAuthorInCNKIByID(id: number) {
+  ensureAuthorAliasesLoaded();
+  const mainID = resolveMainID(id);
+  const creator = Zotero.Creators.get(mainID);
+  if (!creator) {
+    return;
+  }
+  const fullName = formatScholarAuthorName(creator.firstName, creator.lastName);
+  if (!fullName) {
+    return;
+  }
+  const url = `${CNKI_SEARCH_URL}?korder=AU&kw=${encodeURIComponent(fullName)}`;
+  Zotero.launchURL(url);
+}
+
+export async function searchAuthorInCNKIFromPopupMenu(ev: Event) {
+  const id = await resolveCreatorIDFromPopupMenuEvent(ev);
+  if (id <= 0) {
+    return;
+  }
+  searchAuthorInCNKIByID(id);
+}
+
+async function resolveCreatorIDFromPopupMenuEvent(ev: Event) {
+  const contextNodes = collectCreatorContextNodes(ev);
+  const itemBox = findItemBoxForCreatorFields(contextNodes);
+  if (!itemBox) {
+    Zotero.debug?.("[AuthorBrowser] Could not find itemBox with getCreatorFields");
+    return -1;
+  }
+
+  let fields: any = null;
+  for (const node of contextNodes) {
+    fields = tryReadCreatorFieldsFromPopupNode(itemBox, node);
+    if (fields) {
+      break;
+    }
+  }
   if (!fields) {
-    return;
+    Zotero.debug?.("[AuthorBrowser] Could not resolve creator fields from context nodes");
+    return -1;
   }
+
+  const firstName = String(fields.firstName || "").trim();
+  const lastName = String(fields.lastName || "").trim();
+  if (!firstName && !lastName) {
+    return -1;
+  }
+
+  const creatorType =
+    typeof fields.creatorType === "string" && fields.creatorType
+      ? fields.creatorType
+      : typeof fields.creatorTypeID === "number"
+        ? Zotero.CreatorTypes.getName(fields.creatorTypeID)
+        : "author";
+  const isSingleFieldName =
+    Number(fields.fieldMode) === 1 || (!firstName && !!lastName);
 
   let id: number;
   await Zotero.DB.executeTransaction(async function () {
-    id = await Zotero.Creators.getIDFromData({
-      creatorType: Zotero.CreatorTypes.getName(fields.creatorTypeID),
-      firstName: fields.firstName,
-      lastName: fields.lastName,
-    });
+    const creatorData = isSingleFieldName
+      ? {
+          creatorType,
+          name: lastName,
+        }
+      : {
+          creatorType,
+          firstName,
+          lastName,
+        };
+    id = await Zotero.Creators.getIDFromData(creatorData as any);
   });
   if (typeof id !== "number") {
-    return;
+    return -1;
   }
-  id = resolveMainID(id);
-  showAuthorByID(id);
+  return resolveMainID(id);
+}
+
+function collectCreatorContextNodes(ev: Event) {
+  const target = ev.target as Element | null;
+  const currentTarget = ev.currentTarget as Element | null;
+  const popup = target?.closest?.("menupopup") as XULPopupElement | null;
+  const targetDoc = target?.ownerDocument || currentTarget?.ownerDocument || null;
+  const mainDoc = Zotero.getMainWindow()?.document || null;
+  const globalDoc = ztoolkit?.Menu?.getGlobal?.("document") as Document | null;
+  return dedupeElements([
+    (popup as any)?.triggerNode as Element | null,
+    (target as any)?.triggerNode as Element | null,
+    (currentTarget as any)?.triggerNode as Element | null,
+    (targetDoc as any)?.popupNode as Element | null,
+    (mainDoc as any)?.popupNode as Element | null,
+    (globalDoc as any)?.popupNode as Element | null,
+    targetDoc?.activeElement as Element | null,
+    mainDoc?.activeElement as Element | null,
+    globalDoc?.activeElement as Element | null,
+  ]);
+}
+
+function dedupeElements(nodes: Array<Element | null | undefined>) {
+  const deduped: Element[] = [];
+  for (const node of nodes) {
+    if (!isDomElementNode(node)) {
+      continue;
+    }
+    if (!deduped.includes(node)) {
+      deduped.push(node);
+    }
+  }
+  return deduped;
+}
+
+function isDomElementNode(node: any): node is Element {
+  return (
+    !!node &&
+    typeof node === "object" &&
+    node.nodeType === 1 &&
+    typeof node.closest === "function"
+  );
+}
+
+function findItemBoxForCreatorFields(contextNodes: Element[]) {
+  const candidates: any[] = [];
+
+  const collectFromDoc = (doc: Document | null | undefined) => {
+    if (!doc) {
+      return;
+    }
+    candidates.push(doc.querySelector("item-box"));
+    candidates.push(doc.querySelector("info-box"));
+    candidates.push(doc.getElementById("zotero-editpane-item-box"));
+  };
+
+  for (const node of contextNodes) {
+    candidates.push(node.closest?.("item-box"));
+    candidates.push(node.closest?.("info-box"));
+    collectFromDoc(node.ownerDocument);
+  }
+
+  const pane = ZoteroPane?.itemPane as any;
+  if (pane) {
+    candidates.push(pane.itemBox);
+    candidates.push(pane._itemBox);
+    candidates.push(pane.querySelector?.("item-box"));
+    candidates.push(pane.querySelector?.("info-box"));
+    candidates.push(pane.getCurrentPane?.("info"));
+    const currentPane = pane.getCurrentPane?.();
+    candidates.push(currentPane?.querySelector?.("item-box"));
+    candidates.push(currentPane?.querySelector?.("info-box"));
+  }
+
+  const mainDoc = Zotero.getMainWindow()?.document;
+  collectFromDoc(mainDoc);
+
+  for (const candidate of candidates) {
+    if (candidate && typeof candidate.getCreatorFields === "function") {
+      return candidate;
+    }
+  }
+  return null;
+}
+
+function tryReadCreatorFieldsFromPopupNode(itemBox: any, popupNode: Element) {
+  const candidates: Element[] = [];
+  let current: Element | null = popupNode;
+  while (current) {
+    candidates.push(current);
+    current = current.parentElement;
+  }
+  const extraCandidates = [
+    popupNode.closest(".meta-row"),
+    popupNode.closest('[data-row-id*="creator"]'),
+    popupNode.closest('[data-fieldname="creators"]'),
+    popupNode.closest('[data-fieldname="creator"]'),
+    popupNode.closest('[fieldname="creator"]'),
+  ].filter(Boolean) as Element[];
+  for (const candidate of extraCandidates) {
+    if (!candidates.includes(candidate)) {
+      candidates.push(candidate);
+    }
+  }
+  for (const candidate of candidates) {
+    try {
+      const fields = itemBox.getCreatorFields(candidate);
+      if (
+        fields &&
+        (typeof fields.firstName === "string" ||
+          typeof fields.lastName === "string")
+      ) {
+        return fields;
+      }
+    } catch (e) {
+      // Keep trying parent/alternative nodes until fields are found.
+    }
+  }
+  return null;
 }
 
 export async function deleteABSavedSearches() {
@@ -721,6 +925,24 @@ function formatFullName(firstName: string, lastName: string) {
   const cleanFirstName = (firstName || "").trim();
   const cleanLastName = (lastName || "").trim();
   return `${cleanFirstName} ${cleanLastName}`.trim();
+}
+
+function formatScholarAuthorName(firstName: string, lastName: string) {
+  const cleanFirstName = (firstName || "").trim();
+  const cleanLastName = (lastName || "").trim();
+  if (!cleanFirstName && !cleanLastName) {
+    return "";
+  }
+  if (containsCJK(cleanFirstName) || containsCJK(cleanLastName)) {
+    return `${cleanLastName}${cleanFirstName}`.trim();
+  }
+  return formatFullName(cleanFirstName, cleanLastName);
+}
+
+function containsCJK(text: string) {
+  return /[\u3040-\u30ff\u3400-\u4dbf\u4e00-\u9fff\uf900-\ufaff\uac00-\ud7af]/i.test(
+    text || "",
+  );
 }
 
 async function showSearchToItemsView(s: Zotero.Search) {

@@ -5,6 +5,8 @@ import { isWindowAlive } from "../utils/window";
 import {
   showAuthorByID,
   getAllCreators,
+  searchAuthorInGoogleScholarByID,
+  searchAuthorInCNKIByID,
 } from "./authorBrowserAddon";
 import { onDialog as onAliasEditorDialog } from "./aliasEditor";
 
@@ -85,6 +87,10 @@ export async function onDialog() {
         addon.data.manager.columnAscending = ascending > 0;
         quickSort();
       })
+      .setProp("onItemContextMenu", (ev, x, y) => {
+        showAuthorListContextMenu(ev, x, y);
+        return true;
+      })
       .render();
     const refreshButton = win.document.querySelector(
       "#refresh",
@@ -102,6 +108,18 @@ export async function onDialog() {
     const showItemsButton = win.document.querySelector(
       "#show-item",
     ) as HTMLButtonElement;
+    const searchScholarButton = win.document.querySelector(
+      "#search-scholar",
+    ) as HTMLButtonElement;
+    const searchCNKIButton = win.document.querySelector(
+      "#search-cnki",
+    ) as HTMLButtonElement;
+    const searchScholarContextMenuItem = win.document.querySelector(
+      "#search-scholar-context",
+    ) as XUL.MenuItem;
+    const searchCNKIContextMenuItem = win.document.querySelector(
+      "#search-cnki-context",
+    ) as XUL.MenuItem;
     refreshButton.addEventListener("click", () => {
       refresh();
     });
@@ -129,6 +147,18 @@ export async function onDialog() {
       if (creatorID > 0) {
         showAuthorByID(creatorID);
       }
+    });
+    searchScholarButton.addEventListener("click", () => {
+      openScholarForSelection();
+    });
+    searchCNKIButton.addEventListener("click", () => {
+      openCNKIForSelection();
+    });
+    searchScholarContextMenuItem?.addEventListener("command", () => {
+      openScholarForSelection();
+    });
+    searchCNKIContextMenuItem?.addEventListener("command", () => {
+      openCNKIForSelection();
     });
     await refresh();
   }
@@ -184,11 +214,31 @@ function updateButtons() {
   const showItemsButton = win.document.querySelector(
     "#show-item",
   ) as HTMLButtonElement;
+  const searchScholarButton = win.document.querySelector(
+    "#search-scholar",
+  ) as HTMLButtonElement;
+  const searchCNKIButton = win.document.querySelector(
+    "#search-cnki",
+  ) as HTMLButtonElement;
+  const searchScholarContextMenuItem = win.document.querySelector(
+    "#search-scholar-context",
+  ) as XUL.MenuItem;
+  const searchCNKIContextMenuItem = win.document.querySelector(
+    "#search-cnki-context",
+  ) as XUL.MenuItem;
 
   renameButton.disabled = creatorID <= 0;
   aliasButton.disabled = creatorID <= 0;
   swapButton.disabled = creatorID <= 0;
   showItemsButton.disabled = creatorID <= 0;
+  searchScholarButton.disabled = creatorID <= 0;
+  searchCNKIButton.disabled = creatorID <= 0;
+  if (searchScholarContextMenuItem) {
+    searchScholarContextMenuItem.disabled = creatorID <= 0;
+  }
+  if (searchCNKIContextMenuItem) {
+    searchCNKIContextMenuItem.disabled = creatorID <= 0;
+  }
   fixCapssButton.disabled =
     creatorID <= 0 || !canCapitalizeCreatorName(creatorID);
 }
@@ -272,6 +322,118 @@ export async function openAliasManagerForSelection() {
   }
   await onAliasEditorDialog(creatorID);
 }
+
+export function openScholarForSelection() {
+  const creatorID = getSelectedNoteIds();
+  if (creatorID <= 0) {
+    return;
+  }
+  searchAuthorInGoogleScholarByID(creatorID);
+}
+
+export function openCNKIForSelection() {
+  const creatorID = getSelectedNoteIds();
+  if (creatorID <= 0) {
+    return;
+  }
+  searchAuthorInCNKIByID(creatorID);
+}
+
+function showAuthorListContextMenu(ev: Event, x: number, y: number) {
+  const win = addon.data.manager.window;
+  if (!win) {
+    return;
+  }
+  const rawEvent = ev as any;
+  rawEvent?.preventDefault?.();
+  rawEvent?.stopPropagation?.();
+  selectRowFromContextMenuEvent(ev);
+  updateButtons();
+  const popup = win.document.querySelector(
+    "#author-list-context-menu",
+  ) as XULPopupElement | null;
+  if (!popup || typeof popup.openPopupAtScreen !== "function") {
+    return;
+  }
+  const screenX =
+    Number.isFinite(Number(x)) && Number(x) >= 0
+      ? Number(x)
+      : Number(rawEvent?.screenX) || 0;
+  const screenY =
+    Number.isFinite(Number(y)) && Number(y) >= 0
+      ? Number(y)
+      : Number(rawEvent?.screenY) || 0;
+  popup.openPopupAtScreen(screenX, screenY, true);
+}
+
+function selectRowFromContextMenuEvent(ev: Event) {
+  const tableHelper = addon.data.manager.tableHelper;
+  const selection = tableHelper?.treeInstance?.selection;
+  if (!selection || typeof selection.select !== "function") {
+    return;
+  }
+
+  const rowIndex = getRowIndexFromContextMenuEvent(ev);
+  if (
+    Number.isInteger(rowIndex) &&
+    rowIndex >= 0 &&
+    rowIndex < addon.data.manager.data.length
+  ) {
+    selection.select(rowIndex);
+  }
+}
+
+function getRowIndexFromContextMenuEvent(ev: Event) {
+  const rawEvent = ev as any;
+  const directIndexCandidates = [
+    rawEvent?.index,
+    rawEvent?.row,
+    rawEvent?.rowIndex,
+  ];
+  for (const candidate of directIndexCandidates) {
+    const parsedCandidate = Number(candidate);
+    if (Number.isInteger(parsedCandidate) && parsedCandidate >= 0) {
+      return parsedCandidate;
+    }
+  }
+
+  const target = rawEvent?.target as Element | null;
+  if (!target || typeof target.closest !== "function") {
+    return -1;
+  }
+
+  const containers: Array<Element> = [];
+  const closestWithKnownAttr = target.closest(
+    "[data-row-index], [data-row], [data-index]",
+  );
+  if (closestWithKnownAttr) {
+    containers.push(closestWithKnownAttr);
+  }
+  const closestRow = target.closest('[role="row"], .row');
+  if (closestRow) {
+    containers.push(closestRow);
+  }
+
+  for (const container of containers) {
+    const attrCandidates = [
+      container.getAttribute("data-row-index"),
+      container.getAttribute("data-row"),
+      container.getAttribute("data-index"),
+      (container as any).dataset?.rowIndex,
+      (container as any).dataset?.row,
+      (container as any).dataset?.index,
+    ];
+    for (const attrValue of attrCandidates) {
+      const parsedAttrValue = Number(attrValue);
+      if (Number.isInteger(parsedAttrValue) && parsedAttrValue >= 0) {
+        return parsedAttrValue;
+      }
+    }
+  }
+
+  return -1;
+}
+
 async function swapNames(creatorID: number) {
   if (creatorID <= 0) {
     return;

@@ -1,4 +1,5 @@
 show-author = 显示该作者的全部条目
+search-author-google-scholar = 在 Google Scholar 中搜索该作者
 author-browser-tool-menu-item-label = 作者浏览器
 author-browser-tool-menu-clear-search = 清除作者搜索
 
@@ -42,3 +43,5 @@ alias-editor-msg-merge-cancelled = 已取消合并操作。
 alias-editor-confirm-merge-prefix = 此操作将合并
 alias-editor-confirm-merge-suffix = 位作者到当前主作者。是否继续？
 alias-editor-merge-preview-more = ……以及更多分组
+
+search-author-cnki = 在 CNKI 中搜索该作者
