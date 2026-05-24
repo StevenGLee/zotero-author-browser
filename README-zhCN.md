@@ -1,6 +1,6 @@
 # Zotero Author Browser
 
-[![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
+[![zotero target version](https://img.shields.io/badge/Zotero-9%20to%2010--beta-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
 Zotero Author Browser 用于在 Zotero 文库中浏览作者（creator）、查看作者覆盖情况、管理作者别名，并支持跳转到外部作者检索页面。
@@ -10,6 +10,7 @@ Zotero Author Browser 用于在 Zotero 文库中浏览作者（creator）、查�
 ## 当前状态
 
 插件仍在持续开发中，目前主要聚焦 Zotero 中的作者清理工作流：作者浏览、别名管理、外部检索和批量合并复核。
+当前 manifest 兼容目标：Zotero 9.x 到 10.x beta（`strict_max_version: 10.*`）。
 
 ## 功能介绍
 

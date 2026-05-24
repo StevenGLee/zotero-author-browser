@@ -1,6 +1,6 @@
 # Zotero Author Browser
 
-[![zotero target version](https://img.shields.io/badge/Zotero-7-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
+[![zotero target version](https://img.shields.io/badge/Zotero-9%20to%2010--beta-green?style=flat-square&logo=zotero&logoColor=CC2936)](https://www.zotero.org)
 [![Using Zotero Plugin Template](https://img.shields.io/badge/Using-Zotero%20Plugin%20Template-blue?style=flat-square&logo=github)](https://github.com/windingwind/zotero-plugin-template)
 
 Zotero Author Browser helps you browse creators, inspect author coverage, manage author aliases, and jump to external author search pages.
@@ -10,6 +10,7 @@ Zotero Author Browser helps you browse creators, inspect author coverage, manage
 ## Current Status
 
 The plugin is actively developed and currently focuses on daily author-cleanup workflows in Zotero: browsing creators, managing aliases, external author lookup, and batch merge review.
+Current manifest compatibility target: Zotero 9.x through 10.x beta (`strict_max_version: 10.*`).
 
 ## Feature Overview
 
