@@ -5,7 +5,8 @@ export interface CreatorNameLike {
 
 export type CreatorNameMatchType =
   | "normalized-full-name"
-  | "same-last-name-initial";
+  | "abbrev-high-confidence"
+  | "same-last-name-initial-manual";
 
 export function normalizeNamePart(value: string) {
   return (value || "")
@@ -15,6 +16,13 @@ export function normalizeNamePart(value: string) {
     .trim();
 }
 
+export function splitNameTokens(value: string) {
+  return normalizeNamePart(value)
+    .split(" ")
+    .map((token) => token.trim())
+    .filter(Boolean);
+}
+
 export function getNormalizedFullName(creator: CreatorNameLike) {
   const firstName = normalizeNamePart(creator.firstName || "");
   const lastName = normalizeNamePart(creator.lastName || "");
@@ -22,13 +30,45 @@ export function getNormalizedFullName(creator: CreatorNameLike) {
 }
 
 export function getFirstInitial(name: string) {
-  const token = normalizeNamePart(name).split(" ")[0] || "";
+  const token = splitNameTokens(name)[0] || "";
   return token ? token[0] : "";
 }
 
 export function isInitialLike(name: string) {
-  const token = normalizeNamePart(name).split(" ")[0] || "";
-  return token.length === 1;
+  const tokens = splitNameTokens(name);
+  if (tokens.length === 0) {
+    return false;
+  }
+  return tokens.some((token) => token.length === 1);
+}
+
+export function getFirstNameSignature(name: string) {
+  const tokens = splitNameTokens(name);
+  if (tokens.length === 0) {
+    return "";
+  }
+  return tokens.map((token) => token[0] || "").join("");
+}
+
+export function hasAbbreviationForm(name: string) {
+  const tokens = splitNameTokens(name);
+  if (tokens.length === 0) {
+    return false;
+  }
+  return (
+    tokens.some((token) => token.length === 1) ||
+    (tokens.length === 1 && tokens[0].length <= 2)
+  );
+}
+
+export function isPureAbbreviationForm(name: string) {
+  const tokens = splitNameTokens(name);
+  if (tokens.length === 0) {
+    return false;
+  }
+  const allShort = tokens.every((token) => token.length <= 2);
+  const compactLength = tokens.join("").length;
+  return allShort && compactLength <= 4;
 }
 
 export function getCreatorNameMatchType(
@@ -55,8 +95,22 @@ export function getCreatorNameMatchType(
   if (!mainInitial || !candidateInitial || mainInitial !== candidateInitial) {
     return null;
   }
-  if (isInitialLike(mainFirstName) || isInitialLike(candidateFirstName)) {
-    return "same-last-name-initial";
+
+  const mainSignature = getFirstNameSignature(mainFirstName);
+  const candidateSignature = getFirstNameSignature(candidateFirstName);
+  const hasAbbrev =
+    hasAbbreviationForm(mainFirstName) || hasAbbreviationForm(candidateFirstName);
+  if (
+    hasAbbrev &&
+    mainSignature &&
+    candidateSignature &&
+    mainSignature === candidateSignature
+  ) {
+    return "abbrev-high-confidence";
+  }
+
+  if (hasAbbrev) {
+    return "same-last-name-initial-manual";
   }
   return null;
 }

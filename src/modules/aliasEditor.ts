@@ -454,8 +454,11 @@ function getSuggestionMatch(
   if (matchType === "normalized-full-name") {
     return { reason: getString("alias-editor-match-normalized"), priority: 0 };
   }
-  if (matchType === "same-last-name-initial") {
-    return { reason: getString("alias-editor-match-initial"), priority: 1 };
+  if (matchType === "abbrev-high-confidence") {
+    return { reason: getString("alias-editor-match-abbrev"), priority: 1 };
+  }
+  if (matchType === "same-last-name-initial-manual") {
+    return { reason: getString("alias-editor-match-initial"), priority: 2 };
   }
   return null;
 }

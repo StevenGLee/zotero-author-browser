@@ -1,0 +1,17 @@
+title = Ambiguous Abbreviation Review
+abbrev-panel-title = Ambiguous Abbreviation
+candidate-panel-title = Candidate Main Authors
+candidate-select-label = Select one candidate as the target main author:
+author-label = Author
+organization-label = Org
+email-label = Email
+placeholder-reserved = (reserved)
+merge-selected =
+    .label = Merge Into Selected Candidate
+    .tooltiptext = Merge the abbreviation entry into the selected candidate main author
+skip-merge =
+    .label = Skip This Abbreviation
+    .tooltiptext = Do not merge this abbreviation in the current batch run
+close-window =
+    .label = Skip Remaining Ambiguous Groups
+    .tooltiptext = Skip this and all remaining ambiguous abbreviation groups in the current batch run

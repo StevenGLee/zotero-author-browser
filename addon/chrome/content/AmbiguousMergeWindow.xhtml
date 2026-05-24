@@ -1,0 +1,277 @@
+<?xml version="1.0"?>
+<!-- prettier-ignore -->
+<?xml-stylesheet href="chrome://global/skin/" type="text/css"?>
+<!-- prettier-ignore -->
+<?xml-stylesheet href="chrome://zotero/skin/zotero.css" type="text/css"?>
+<!-- prettier-ignore -->
+<?xml-stylesheet href="chrome://zotero-platform/content/zotero-react-client.css" type="text/css"?>
+<!-- prettier-ignore -->
+<?xml-stylesheet href="chrome://zotero-platform/content/zotero.css" type="text/css"?>
+<!-- prettier-ignore -->
+<!DOCTYPE html>
+<html
+  id="__addonRef__-ambiguousMergeWindow"
+  lang="en"
+  xmlns="http://www.w3.org/1999/xhtml"
+  xmlns:xul="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+  xmlns:html="http://www.w3.org/1999/xhtml"
+  windowtype="__addonRef__-ambiguousMergeWindow"
+  sizemode="normal"
+  scrolling="false"
+  persist="screenX screenY width height sizemode"
+>
+  <head>
+    <title data-l10n-id="title"></title>
+    <meta charset="utf-8" />
+    <xul:linkset>
+      <link rel="localization" href="browser/menubar.ftl" />
+      <link rel="localization" href="browser/browserSets.ftl" />
+      <link rel="localization" href="toolkit/global/textActions.ftl" />
+      <link rel="localization" href="zotero.ftl" />
+      <link rel="localization" href="__addonRef__-ambiguousMergeWindow.ftl" />
+    </xul:linkset>
+    <xul:commandset id="mainCommandSet">
+      <xul:command id="cmd_close" oncommand="window.close();" />
+    </xul:commandset>
+    <xul:keyset id="mainKeyset">
+      <xul:key
+        id="key_close"
+        data-l10n-id="close-shortcut"
+        command="cmd_close"
+        modifiers="accel"
+        reserved="true"
+      />
+    </xul:keyset>
+    <script>
+      document.addEventListener("DOMContentLoaded", () => {
+        const scriptLoader = Components.classes[
+          "@mozilla.org/moz/jssubscript-loader;1"
+        ].getService(Components.interfaces.mozIJSSubScriptLoader);
+        scriptLoader.loadSubScript("chrome://zotero/content/include.js", this);
+        window.arguments[0]._initPromise.resolve();
+      });
+    </script>
+    <style>
+      html,
+      body {
+        min-width: 1200px;
+        min-height: 660px;
+      }
+
+      html,
+      body {
+        padding: 0;
+        margin: 0;
+        height: 100%;
+        overflow: hidden;
+        user-select: none;
+      }
+
+      .top-info {
+        box-sizing: border-box;
+        height: 72px;
+        padding: 10px;
+        border-bottom: 1px solid var(--color-border-secondary);
+      }
+
+      #progress-text {
+        font-size: 13px;
+        font-weight: 600;
+      }
+
+      #ambiguous-note {
+        margin-top: 6px;
+        font-size: 12px;
+        color: var(--color-text-secondary);
+      }
+
+      .panel-wrap {
+        box-sizing: border-box;
+        height: calc(100% - 132px);
+        padding: 10px;
+        display: grid;
+        grid-template-columns: 1fr 1fr;
+        gap: 10px;
+        background: var(--material-background);
+      }
+
+      .panel {
+        border: 1px solid var(--color-border-secondary);
+        border-radius: 6px;
+        min-width: 0;
+        display: flex;
+        flex-direction: column;
+      }
+
+      .panel-title {
+        margin: 0;
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--color-border-secondary);
+        font-size: 13px;
+      }
+
+      .author-meta {
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--color-border-secondary);
+        font-size: 12px;
+      }
+
+      .author-meta-row {
+        display: flex;
+        gap: 6px;
+        margin-bottom: 4px;
+        min-width: 0;
+      }
+
+      .author-meta-row:last-child {
+        margin-bottom: 0;
+      }
+
+      .author-meta-label {
+        width: 72px;
+        flex-shrink: 0;
+        color: var(--color-text-secondary);
+      }
+
+      .author-meta-value {
+        flex: 1;
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+
+      .candidate-section {
+        padding: 8px 10px;
+        border-bottom: 1px solid var(--color-border-secondary);
+      }
+
+      .candidate-label {
+        display: block;
+        margin-bottom: 4px;
+        font-size: 12px;
+        color: var(--color-text-secondary);
+      }
+
+      #candidate-select {
+        width: 100%;
+        min-height: 120px;
+      }
+
+      .item-list {
+        margin: 0;
+        padding: 6px 12px 10px 24px;
+        flex: 1;
+        overflow: auto;
+      }
+
+      .item-list li {
+        margin: 0;
+        padding: 2px 0;
+        cursor: default;
+        white-space: nowrap;
+        overflow: hidden;
+        text-overflow: ellipsis;
+      }
+
+      .item-list li.placeholder {
+        list-style: none;
+        margin-left: -14px;
+        color: var(--color-text-secondary);
+      }
+
+      .footer-container {
+        justify-content: flex-start;
+        padding: 10px;
+      }
+
+      #ambiguous-merge-message {
+        min-width: 280px;
+        margin-left: 10px;
+        font-size: 12px;
+        color: var(--color-text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
+    </style>
+  </head>
+  <body class="zotero-window">
+    <div class="top-info">
+      <div id="progress-text"></div>
+      <div id="ambiguous-note"></div>
+    </div>
+    <div class="panel-wrap">
+      <section class="panel">
+        <h2 class="panel-title" data-l10n-id="abbrev-panel-title"></h2>
+        <div class="author-meta">
+          <div class="author-meta-row">
+            <span class="author-meta-label" data-l10n-id="author-label"></span>
+            <span class="author-meta-value" id="left-author-name"></span>
+          </div>
+          <div class="author-meta-row">
+            <span
+              class="author-meta-label"
+              data-l10n-id="organization-label"
+            ></span>
+            <span
+              class="author-meta-value"
+              data-l10n-id="placeholder-reserved"
+            ></span>
+          </div>
+          <div class="author-meta-row">
+            <span class="author-meta-label" data-l10n-id="email-label"></span>
+            <span
+              class="author-meta-value"
+              data-l10n-id="placeholder-reserved"
+            ></span>
+          </div>
+        </div>
+        <ul id="left-item-list" class="item-list"></ul>
+      </section>
+      <section class="panel">
+        <h2 class="panel-title" data-l10n-id="candidate-panel-title"></h2>
+        <div class="candidate-section">
+          <label
+            class="candidate-label"
+            for="candidate-select"
+            data-l10n-id="candidate-select-label"
+          ></label>
+          <select id="candidate-select" size="6"></select>
+        </div>
+        <div class="author-meta">
+          <div class="author-meta-row">
+            <span class="author-meta-label" data-l10n-id="author-label"></span>
+            <span class="author-meta-value" id="right-author-name"></span>
+          </div>
+          <div class="author-meta-row">
+            <span
+              class="author-meta-label"
+              data-l10n-id="organization-label"
+            ></span>
+            <span
+              class="author-meta-value"
+              data-l10n-id="placeholder-reserved"
+            ></span>
+          </div>
+          <div class="author-meta-row">
+            <span class="author-meta-label" data-l10n-id="email-label"></span>
+            <span
+              class="author-meta-value"
+              data-l10n-id="placeholder-reserved"
+            ></span>
+          </div>
+        </div>
+        <ul id="right-item-list" class="item-list"></ul>
+      </section>
+    </div>
+    <div
+      class="footer-container"
+      xmlns="http://www.mozilla.org/keymaster/gatekeeper/there.is.only.xul"
+    >
+      <button id="merge-selected" data-l10n-id="merge-selected"></button>
+      <button id="skip-merge" data-l10n-id="skip-merge"></button>
+      <button id="close-window" data-l10n-id="close-window"></button>
+      <html:div id="ambiguous-merge-message"></html:div>
+    </div>
+  </body>
+</html>

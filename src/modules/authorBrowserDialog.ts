@@ -6,6 +6,7 @@ import {
   applyAliasMutation,
   CreatorStatDataRow,
   expandGroupForMerge,
+  getAllAliasByMainID,
   getAllCreatorStats,
   getAllCreators,
   hasAliasGroup,
@@ -20,22 +21,51 @@ import {
 } from "./aliasEditor";
 import {
   getCreatorNameMatchType,
+  getFirstNameSignature,
+  hasAbbreviationForm,
+  isPureAbbreviationForm,
   getNormalizedFullName,
 } from "./authorNameMatch";
 
-type BulkMergePhase = "phase1-normalized" | "phase2-initial";
+type BulkMergePhase =
+  | "phase1-normalized"
+  | "phase1-abbrev"
+  | "phase2-ambiguous"
+  | "phase2-manual";
 type BulkMergeDecision =
-  | "auto"
-  | "yes"
-  | "no"
-  | "all-yes"
-  | "all-no"
+  | "auto-normalized"
+  | "auto-abbrev"
+  | "manual-yes"
+  | "manual-no"
+  | "manual-all-yes"
+  | "manual-all-no"
+  | "ambiguous-selected"
+  | "ambiguous-skipped"
   | "skipped";
 
-interface BulkMergeGroupPlan {
+interface BulkMergeAutoGroupPlan {
   phase: BulkMergePhase;
   targetMainID: number;
   candidateMainIDs: number[];
+}
+
+interface BulkMergeManualPairPlan {
+  phase: "phase2-manual";
+  targetMainID: number;
+  candidateMainID: number;
+}
+
+interface BulkMergeAmbiguousPlan {
+  phase: "phase2-ambiguous";
+  abbrevMainID: number;
+  candidateMainIDs: number[];
+}
+
+interface BulkMergePlan {
+  autoNormalizedGroups: BulkMergeAutoGroupPlan[];
+  autoAbbrevGroups: BulkMergeAutoGroupPlan[];
+  ambiguousGroups: BulkMergeAmbiguousPlan[];
+  manualPairs: BulkMergeManualPairPlan[];
 }
 
 interface BulkMergeDetailEntry {
@@ -45,6 +75,7 @@ interface BulkMergeDetailEntry {
   candidateMainIDs: number[];
   candidateMainNames: string[];
   decision: BulkMergeDecision;
+  reason: string;
   addedAliasCount: number;
   mergedGroupCount: number;
   skippedCount: number;
@@ -55,8 +86,10 @@ interface BulkMergeReport {
   startedAt: number;
   finishedAt: number;
   cancelled: boolean;
-  phase1GroupCount: number;
-  phase2GroupCount: number;
+  phase1NormalizedCount: number;
+  phase1AbbrevCount: number;
+  phase2AmbiguousCount: number;
+  phase2ManualCount: number;
   addedAliasCount: number;
   mergedGroupCount: number;
   skippedCount: number;
@@ -69,9 +102,35 @@ interface MainAuthorRecord {
   firstName: string;
   lastName: string;
   normalizedFullName: string;
+  firstNameSignature: string;
+  hasAbbreviationForm: boolean;
+  isPureAbbreviation: boolean;
   itemCount: number;
   hasAliasGroup: boolean;
 }
+
+interface BulkMergePairEdge {
+  leftMainID: number;
+  rightMainID: number;
+}
+
+interface AuthorPreviewItemRow {
+  itemID: number;
+  title: string;
+  year: string;
+}
+
+type AmbiguousWindowDecision =
+  | {
+      action: "selected";
+      selectedMainID: number;
+    }
+  | {
+      action: "skip-current";
+    }
+  | {
+      action: "skip-all";
+    };
 
 let bulkMergeRunning = false;
 let latestBulkMergeReport: BulkMergeReport | undefined = undefined;
@@ -461,6 +520,15 @@ export async function openAliasManagerForSelection() {
   await onAliasEditorDialog(creatorID);
 }
 
+export async function runBatchMergeFromToolMenu() {
+  if (bulkMergeRunning) {
+    return;
+  }
+  await runBatchMergeAllAuthors({
+    headless: true,
+  });
+}
+
 export function openScholarForSelection() {
   const creatorID = getSelectedNoteIds();
   if (creatorID <= 0) {
@@ -477,7 +545,12 @@ export function openCNKIForSelection() {
   searchAuthorInCNKIByID(creatorID);
 }
 
-async function runBatchMergeAllAuthors() {
+async function runBatchMergeAllAuthors(
+  options: {
+    headless?: boolean;
+  } = {},
+) {
+  const headless = !!options.headless;
   if (bulkMergeRunning) {
     return;
   }
@@ -486,13 +559,21 @@ async function runBatchMergeAllAuthors() {
   updateButtons();
 
   try {
-    const { phase1Groups, phase2Groups } = await createBatchMergePlan();
+    const plan = await createBatchMergePlan();
+    const {
+      autoNormalizedGroups,
+      autoAbbrevGroups,
+      ambiguousGroups,
+      manualPairs,
+    } = plan;
     const draftReport: BulkMergeReport = {
       startedAt: Date.now(),
       finishedAt: Date.now(),
       cancelled: false,
-      phase1GroupCount: phase1Groups.length,
-      phase2GroupCount: phase2Groups.length,
+      phase1NormalizedCount: autoNormalizedGroups.length,
+      phase1AbbrevCount: autoAbbrevGroups.length,
+      phase2AmbiguousCount: ambiguousGroups.length,
+      phase2ManualCount: manualPairs.length,
       addedAliasCount: 0,
       mergedGroupCount: 0,
       skippedCount: 0,
@@ -500,15 +581,29 @@ async function runBatchMergeAllAuthors() {
       entries: [],
     };
 
-    if (phase1Groups.length === 0 && phase2Groups.length === 0) {
+    if (
+      autoNormalizedGroups.length === 0 &&
+      autoAbbrevGroups.length === 0 &&
+      ambiguousGroups.length === 0 &&
+      manualPairs.length === 0
+    ) {
       latestBulkMergeReport = draftReport;
       setBatchMergeStatusMessage(getString("bulk-merge-msg-no-candidates"));
+      if (headless) {
+        Services.prompt.alert(
+          getPromptParentWindow(),
+          getString("bulk-merge-confirm-title"),
+          getString("bulk-merge-msg-no-candidates"),
+        );
+      }
       return;
     }
 
     const precheckText = [
-      `${getString("bulk-merge-confirm-phase1")} ${phase1Groups.length}`,
-      `${getString("bulk-merge-confirm-phase2")} ${phase2Groups.length}`,
+      `${getString("bulk-merge-confirm-phase1a")} ${autoNormalizedGroups.length}`,
+      `${getString("bulk-merge-confirm-phase1b")} ${autoAbbrevGroups.length}`,
+      `${getString("bulk-merge-confirm-phase2b")} ${manualPairs.length}`,
+      `${getString("bulk-merge-confirm-phase2a")} ${ambiguousGroups.length}`,
       getString("bulk-merge-confirm-continue"),
     ].join("\n");
     if (!(await askBatchMergePrecheckConfirmation(precheckText))) {
@@ -516,49 +611,156 @@ async function runBatchMergeAllAuthors() {
       draftReport.finishedAt = Date.now();
       latestBulkMergeReport = draftReport;
       setBatchMergeStatusMessage(getString("bulk-merge-msg-precheck-cancelled"));
+      if (headless) {
+        Services.prompt.alert(
+          getPromptParentWindow(),
+          getString("bulk-merge-confirm-title"),
+          getString("bulk-merge-msg-precheck-cancelled"),
+        );
+      }
       return;
     }
 
-    let globalPhase2Decision: "all-yes" | "all-no" | undefined = undefined;
+    let globalManualDecision: "manual-all-yes" | "manual-all-no" | undefined =
+      undefined;
 
-    for (const group of phase1Groups) {
-      if (!isWindowAlive(addon.data.manager.window)) {
+    for (const group of autoNormalizedGroups) {
+      if (!headless && !isWindowAlive(addon.data.manager.window)) {
         draftReport.cancelled = true;
         break;
       }
-      await executeBatchMergeGroup(draftReport, group, "auto");
+      await executeBatchMergeGroup(
+        draftReport,
+        group,
+        "auto-normalized",
+        getString("bulk-merge-reason-auto-normalized"),
+      );
     }
 
-    for (let index = 0; index < phase2Groups.length; index++) {
-      if (!isWindowAlive(addon.data.manager.window)) {
+    for (const group of autoAbbrevGroups) {
+      if (!headless && !isWindowAlive(addon.data.manager.window)) {
         draftReport.cancelled = true;
         break;
       }
-      const group = phase2Groups[index];
-      const { targetMainID, candidateMainIDs } = resolveLiveMergeTargets(group);
+      await executeBatchMergeGroup(
+        draftReport,
+        group,
+        "auto-abbrev",
+        getString("bulk-merge-reason-auto-abbrev"),
+      );
+    }
+
+    for (let index = 0; index < manualPairs.length; index++) {
+      if (!headless && !isWindowAlive(addon.data.manager.window)) {
+        draftReport.cancelled = true;
+        break;
+      }
+      const pair = manualPairs[index];
+      const { targetMainID, candidateMainIDs } = resolveLiveMergeTargets({
+        phase: "phase2-manual",
+        targetMainID: pair.targetMainID,
+        candidateMainIDs: [pair.candidateMainID],
+      });
       if (targetMainID <= 0 || candidateMainIDs.length === 0) {
-        await executeBatchMergeGroup(draftReport, group, "skipped");
+        await executeBatchMergeGroup(
+          draftReport,
+          {
+            phase: "phase2-manual",
+            targetMainID: pair.targetMainID,
+            candidateMainIDs: [pair.candidateMainID],
+          },
+          "skipped",
+          getString("bulk-merge-reason-manual"),
+        );
         continue;
       }
 
-      let decision: BulkMergeDecision = globalPhase2Decision || "no";
-      if (!globalPhase2Decision) {
+      let decision: BulkMergeDecision = globalManualDecision || "manual-no";
+      if (!globalManualDecision) {
         decision = await askPhase2GroupDecision(
           {
-            ...group,
+            phase: "phase2-manual",
             targetMainID,
             candidateMainIDs,
           },
           index + 1,
-          phase2Groups.length,
+          manualPairs.length,
         );
-        if (decision === "all-yes") {
-          globalPhase2Decision = "all-yes";
-        } else if (decision === "all-no") {
-          globalPhase2Decision = "all-no";
+        if (decision === "manual-all-yes") {
+          globalManualDecision = "manual-all-yes";
+        } else if (decision === "manual-all-no") {
+          globalManualDecision = "manual-all-no";
         }
       }
-      await executeBatchMergeGroup(draftReport, group, decision);
+      await executeBatchMergeGroup(
+        draftReport,
+        {
+          phase: "phase2-manual",
+          targetMainID: pair.targetMainID,
+          candidateMainIDs: [pair.candidateMainID],
+        },
+        decision,
+        getString("bulk-merge-reason-manual"),
+      );
+    }
+
+    for (let index = 0; index < ambiguousGroups.length; index++) {
+      if (!headless && !isWindowAlive(addon.data.manager.window)) {
+        draftReport.cancelled = true;
+        break;
+      }
+      const group = ambiguousGroups[index];
+      const { abbrevMainID, candidateMainIDs } = resolveLiveAmbiguousTargets(group);
+      if (abbrevMainID <= 0 || candidateMainIDs.length === 0) {
+        recordAmbiguousSkip(
+          draftReport,
+          group.abbrevMainID,
+          candidateMainIDs,
+          getString("bulk-merge-reason-ambiguous-window"),
+        );
+        continue;
+      }
+
+      const decision = await askAmbiguousGroupDecision(
+        {
+          ...group,
+          abbrevMainID,
+          candidateMainIDs,
+        },
+        index + 1,
+        ambiguousGroups.length,
+      );
+      if (decision.action === "selected") {
+        await executeAmbiguousSelectedMerge(
+          draftReport,
+          abbrevMainID,
+          decision.selectedMainID,
+          getString("bulk-merge-reason-ambiguous-window"),
+        );
+        continue;
+      }
+
+      recordAmbiguousSkip(
+        draftReport,
+        abbrevMainID,
+        candidateMainIDs,
+        getString("bulk-merge-reason-ambiguous-window"),
+      );
+
+      if (decision.action === "skip-all") {
+        for (let rest = index + 1; rest < ambiguousGroups.length; rest++) {
+          const restGroup = ambiguousGroups[rest];
+          const { abbrevMainID: restAbbrevMainID, candidateMainIDs: restCandidates } =
+            resolveLiveAmbiguousTargets(restGroup);
+          recordAmbiguousSkip(
+            draftReport,
+            restAbbrevMainID > 0 ? restAbbrevMainID : restGroup.abbrevMainID,
+            restCandidates,
+            getString("bulk-merge-reason-ambiguous-window"),
+          );
+        }
+        break;
+      }
     }
 
     draftReport.finishedAt = Date.now();
@@ -570,6 +772,13 @@ async function runBatchMergeAllAuthors() {
 
     if (draftReport.cancelled) {
       setBatchMergeStatusMessage(getString("bulk-merge-msg-cancelled"));
+      if (headless) {
+        Services.prompt.alert(
+          getPromptParentWindow(),
+          getString("bulk-merge-confirm-title"),
+          getString("bulk-merge-msg-cancelled"),
+        );
+      }
       return;
     }
 
@@ -579,6 +788,13 @@ async function runBatchMergeAllAuthors() {
       draftReport.conflictCount <= 0
     ) {
       setBatchMergeStatusMessage(getString("bulk-merge-msg-finished-no-changes"));
+      if (headless) {
+        Services.prompt.alert(
+          getPromptParentWindow(),
+          getString("bulk-merge-confirm-title"),
+          getString("bulk-merge-msg-finished-no-changes"),
+        );
+      }
       return;
     }
 
@@ -592,11 +808,32 @@ async function runBatchMergeAllAuthors() {
         },
       }),
     );
+    if (headless) {
+      Services.prompt.alert(
+        getPromptParentWindow(),
+        getString("bulk-merge-confirm-title"),
+        getString("bulk-merge-msg-finished", {
+          args: {
+            added: draftReport.addedAliasCount,
+            mergedGroups: draftReport.mergedGroupCount,
+            skipped: draftReport.skippedCount,
+            conflicts: draftReport.conflictCount,
+          },
+        }),
+      );
+    }
   } catch (error) {
     ztoolkit.log?.(`[AuthorBrowser] Batch merge failed: ${String(error)}`);
     setBatchMergeStatusMessage(
       `${getString("bulk-merge-msg-error-prefix")} ${String(error)}`,
     );
+    if (headless) {
+      Services.prompt.alert(
+        getPromptParentWindow(),
+        getString("bulk-merge-confirm-title"),
+        `${getString("bulk-merge-msg-error-prefix")} ${String(error)}`,
+      );
+    }
   } finally {
     bulkMergeRunning = false;
     updateButtons();
@@ -606,11 +843,29 @@ async function runBatchMergeAllAuthors() {
 async function createBatchMergePlan() {
   const creatorStats = await getAllCreatorStats("itemCount", true);
   const mainRecords = buildMainAuthorRecords(creatorStats);
-  const phase1Groups = buildPhase1Groups(mainRecords);
-  const phase2Groups = buildPhase2Groups(mainRecords);
+  const normalizedGroups = buildPhase1NormalizedGroups(mainRecords);
+  const { highConfidenceEdges, manualEdges } = buildMatchEdges(mainRecords);
+  const ambiguousGroups = buildAmbiguousGroups(mainRecords, highConfidenceEdges);
+  const ambiguousPairKeySet = getAmbiguousPairKeySet(ambiguousGroups);
+  const filteredHighConfidenceEdges = highConfidenceEdges.filter(
+    (edge) => !ambiguousPairKeySet.has(getPairKey(edge.leftMainID, edge.rightMainID)),
+  );
+  const autoAbbrevGroups = buildAutoGroupsFromEdges(
+    mainRecords,
+    filteredHighConfidenceEdges,
+  );
+  const manualPairs = buildManualPairs(
+    mainRecords,
+    manualEdges.filter(
+      (edge) =>
+        !ambiguousPairKeySet.has(getPairKey(edge.leftMainID, edge.rightMainID)),
+    ),
+  );
   return {
-    phase1Groups,
-    phase2Groups,
+    autoNormalizedGroups: normalizedGroups,
+    autoAbbrevGroups,
+    ambiguousGroups,
+    manualPairs,
   };
 }
 
@@ -653,6 +908,9 @@ function buildMainAuthorRecords(creatorStats: CreatorStatDataRow[]) {
         firstName: creator.firstName || "",
         lastName: creator.lastName || "",
       }),
+      firstNameSignature: getFirstNameSignature(creator.firstName || ""),
+      hasAbbreviationForm: hasAbbreviationForm(creator.firstName || ""),
+      isPureAbbreviation: isPureAbbreviationForm(creator.firstName || ""),
       itemCount,
       hasAliasGroup: hasAliasGroup(mainID),
     });
@@ -661,7 +919,7 @@ function buildMainAuthorRecords(creatorStats: CreatorStatDataRow[]) {
   return records;
 }
 
-function buildPhase1Groups(mainRecords: MainAuthorRecord[]) {
+function buildPhase1NormalizedGroups(mainRecords: MainAuthorRecord[]) {
   const recordByID = new Map<number, MainAuthorRecord>(
     mainRecords.map((record) => [record.mainID, record]),
   );
@@ -677,7 +935,7 @@ function buildPhase1Groups(mainRecords: MainAuthorRecord[]) {
     groupsByFullName.get(record.normalizedFullName)!.push(record);
   }
 
-  const groups: BulkMergeGroupPlan[] = [];
+  const groups: BulkMergeAutoGroupPlan[] = [];
   for (const records of groupsByFullName.values()) {
     if (records.length <= 1) {
       continue;
@@ -695,34 +953,122 @@ function buildPhase1Groups(mainRecords: MainAuthorRecord[]) {
   );
 }
 
-function buildPhase2Groups(mainRecords: MainAuthorRecord[]) {
-  const recordByID = new Map<number, MainAuthorRecord>();
-  for (const record of mainRecords) {
-    recordByID.set(record.mainID, record);
-  }
-
-  const adjacency = new Map<number, Set<number>>();
+function buildMatchEdges(mainRecords: MainAuthorRecord[]) {
+  const highConfidenceEdges: BulkMergePairEdge[] = [];
+  const manualEdges: BulkMergePairEdge[] = [];
   for (let i = 0; i < mainRecords.length; i++) {
     const left = mainRecords[i];
     for (let j = i + 1; j < mainRecords.length; j++) {
       const right = mainRecords[j];
       const matchType = getCreatorNameMatchType(left, right);
-      if (matchType !== "same-last-name-initial") {
-        continue;
+      if (matchType === "abbrev-high-confidence") {
+        highConfidenceEdges.push({
+          leftMainID: left.mainID,
+          rightMainID: right.mainID,
+        });
+      } else if (matchType === "same-last-name-initial-manual") {
+        manualEdges.push({
+          leftMainID: left.mainID,
+          rightMainID: right.mainID,
+        });
       }
-      if (!adjacency.has(left.mainID)) {
-        adjacency.set(left.mainID, new Set<number>());
+    }
+  }
+  return {
+    highConfidenceEdges,
+    manualEdges,
+  };
+}
+
+function buildAmbiguousGroups(
+  mainRecords: MainAuthorRecord[],
+  highConfidenceEdges: BulkMergePairEdge[],
+) {
+  const recordByID = new Map<number, MainAuthorRecord>(
+    mainRecords.map((record) => [record.mainID, record]),
+  );
+  const candidatesByAbbrevID = new Map<number, Set<number>>();
+  for (const edge of highConfidenceEdges) {
+    const left = recordByID.get(edge.leftMainID);
+    const right = recordByID.get(edge.rightMainID);
+    if (!left || !right) {
+      continue;
+    }
+
+    if (
+      left.isPureAbbreviation &&
+      left.firstNameSignature.length <= 1 &&
+      right.mainID !== left.mainID
+    ) {
+      if (!candidatesByAbbrevID.has(left.mainID)) {
+        candidatesByAbbrevID.set(left.mainID, new Set<number>());
       }
-      if (!adjacency.has(right.mainID)) {
-        adjacency.set(right.mainID, new Set<number>());
+      candidatesByAbbrevID.get(left.mainID)!.add(right.mainID);
+    }
+    if (
+      right.isPureAbbreviation &&
+      right.firstNameSignature.length <= 1 &&
+      left.mainID !== right.mainID
+    ) {
+      if (!candidatesByAbbrevID.has(right.mainID)) {
+        candidatesByAbbrevID.set(right.mainID, new Set<number>());
       }
-      adjacency.get(left.mainID)!.add(right.mainID);
-      adjacency.get(right.mainID)!.add(left.mainID);
+      candidatesByAbbrevID.get(right.mainID)!.add(left.mainID);
     }
   }
 
+  const groups: BulkMergeAmbiguousPlan[] = [];
+  for (const [abbrevMainID, candidateSet] of candidatesByAbbrevID) {
+    const candidates = Array.from(candidateSet).filter((id) => id > 0);
+    if (candidates.length <= 1) {
+      continue;
+    }
+    const sortedCandidates = candidates.sort((leftID, rightID) =>
+      compareGroupTargetPriority(recordByID, leftID, rightID),
+    );
+    groups.push({
+      phase: "phase2-ambiguous",
+      abbrevMainID,
+      candidateMainIDs: sortedCandidates,
+    });
+  }
+
+  return groups.sort((left, right) =>
+    compareGroupTargetPriority(recordByID, left.abbrevMainID, right.abbrevMainID),
+  );
+}
+
+function getAmbiguousPairKeySet(groups: BulkMergeAmbiguousPlan[]) {
+  const pairKeySet = new Set<string>();
+  for (const group of groups) {
+    for (const candidateMainID of group.candidateMainIDs) {
+      pairKeySet.add(getPairKey(group.abbrevMainID, candidateMainID));
+    }
+  }
+  return pairKeySet;
+}
+
+function buildAutoGroupsFromEdges(
+  mainRecords: MainAuthorRecord[],
+  edges: BulkMergePairEdge[],
+) {
+  const recordByID = new Map<number, MainAuthorRecord>(
+    mainRecords.map((record) => [record.mainID, record]),
+  );
+  const adjacency = new Map<number, Set<number>>();
+  for (const edge of edges) {
+    if (!adjacency.has(edge.leftMainID)) {
+      adjacency.set(edge.leftMainID, new Set<number>());
+    }
+    if (!adjacency.has(edge.rightMainID)) {
+      adjacency.set(edge.rightMainID, new Set<number>());
+    }
+    adjacency.get(edge.leftMainID)!.add(edge.rightMainID);
+    adjacency.get(edge.rightMainID)!.add(edge.leftMainID);
+  }
+
+  const groups: BulkMergeAutoGroupPlan[] = [];
   const visited = new Set<number>();
-  const groups: BulkMergeGroupPlan[] = [];
   for (const startMainID of adjacency.keys()) {
     if (visited.has(startMainID)) {
       continue;
@@ -730,7 +1076,6 @@ function buildPhase2Groups(mainRecords: MainAuthorRecord[]) {
     const queue = [startMainID];
     visited.add(startMainID);
     const component: MainAuthorRecord[] = [];
-
     while (queue.length > 0) {
       const currentMainID = queue.shift()!;
       const record = recordByID.get(currentMainID);
@@ -746,14 +1091,12 @@ function buildPhase2Groups(mainRecords: MainAuthorRecord[]) {
         queue.push(neighborMainID);
       }
     }
-
     if (component.length <= 1) {
       continue;
     }
-
     const sorted = component.sort(compareMainAuthorPriority);
     groups.push({
-      phase: "phase2-initial",
+      phase: "phase1-abbrev",
       targetMainID: sorted[0].mainID,
       candidateMainIDs: sorted.slice(1).map((record) => record.mainID),
     });
@@ -762,6 +1105,56 @@ function buildPhase2Groups(mainRecords: MainAuthorRecord[]) {
   return groups.sort((a, b) =>
     compareGroupTargetPriority(recordByID, a.targetMainID, b.targetMainID),
   );
+}
+
+function buildManualPairs(
+  mainRecords: MainAuthorRecord[],
+  edges: BulkMergePairEdge[],
+) {
+  const recordByID = new Map<number, MainAuthorRecord>(
+    mainRecords.map((record) => [record.mainID, record]),
+  );
+  const pairsByKey = new Map<string, BulkMergeManualPairPlan>();
+  for (const edge of edges) {
+    const left = recordByID.get(edge.leftMainID);
+    const right = recordByID.get(edge.rightMainID);
+    if (!left || !right) {
+      continue;
+    }
+    const target = compareMainAuthorPriority(left, right) <= 0 ? left : right;
+    const candidate = target.mainID === left.mainID ? right : left;
+    const key = `${target.mainID}->${candidate.mainID}`;
+    if (!pairsByKey.has(key)) {
+      pairsByKey.set(key, {
+        phase: "phase2-manual",
+        targetMainID: target.mainID,
+        candidateMainID: candidate.mainID,
+      });
+    }
+  }
+
+  return Array.from(pairsByKey.values()).sort((left, right) => {
+    const targetCompare = compareGroupTargetPriority(
+      recordByID,
+      left.targetMainID,
+      right.targetMainID,
+    );
+    if (targetCompare !== 0) {
+      return targetCompare;
+    }
+    return compareGroupTargetPriority(
+      recordByID,
+      left.candidateMainID,
+      right.candidateMainID,
+    );
+  });
+}
+
+function getPairKey(leftMainID: number, rightMainID: number) {
+  if (leftMainID <= rightMainID) {
+    return `${leftMainID}-${rightMainID}`;
+  }
+  return `${rightMainID}-${leftMainID}`;
 }
 
 function compareMainAuthorPriority(a: MainAuthorRecord, b: MainAuthorRecord) {
@@ -814,7 +1207,11 @@ async function askBatchMergePrecheckConfirmation(precheckText: string) {
 }
 
 async function askPhase2GroupDecision(
-  group: BulkMergeGroupPlan,
+  group: {
+    phase: "phase2-manual";
+    targetMainID: number;
+    candidateMainIDs: number[];
+  },
   index: number,
   total: number,
 ): Promise<BulkMergeDecision> {
@@ -847,20 +1244,329 @@ async function askPhase2GroupDecision(
     buttonFlags,
     getString("bulk-merge-action-yes"),
     getString("bulk-merge-action-no"),
-    getString("cancel"),
+    getString("bulk-merge-action-skip-rest-no"),
     getString("bulk-merge-prompt-apply-all"),
     applyToAll,
   );
+  if (buttonIndex !== 0 && buttonIndex !== 1) {
+    return "manual-all-no";
+  }
   if (buttonIndex === 0 && applyToAll.value) {
-    return "all-yes";
+    return "manual-all-yes";
   }
   if (buttonIndex === 1 && applyToAll.value) {
-    return "all-no";
+    return "manual-all-no";
   }
   if (buttonIndex === 0) {
-    return "yes";
+    return "manual-yes";
   }
-  return "no";
+  return "manual-no";
+}
+
+async function askAmbiguousGroupDecision(
+  group: BulkMergeAmbiguousPlan,
+  index: number,
+  total: number,
+): Promise<AmbiguousWindowDecision> {
+  const windowArgs = {
+    _initPromise: Zotero.Promise.defer(),
+  };
+  const win = Zotero.getMainWindow().openDialog(
+    `chrome://${config.addonRef}/content/AmbiguousMergeWindow.xhtml`,
+    `${config.addonRef}-ambiguousMergeWindow`,
+    `chrome,centerscreen,resizable,status,dialog=no`,
+    windowArgs,
+  )!;
+  await windowArgs._initPromise.promise;
+
+  const progressNode = win.document.querySelector(
+    "#progress-text",
+  ) as HTMLElement | null;
+  const noteNode = win.document.querySelector(
+    "#ambiguous-note",
+  ) as HTMLElement | null;
+  const leftAuthorNameNode = win.document.querySelector(
+    "#left-author-name",
+  ) as HTMLElement | null;
+  const rightAuthorNameNode = win.document.querySelector(
+    "#right-author-name",
+  ) as HTMLElement | null;
+  const candidateSelect = win.document.querySelector(
+    "#candidate-select",
+  ) as HTMLSelectElement | null;
+  const leftItemList = win.document.querySelector(
+    "#left-item-list",
+  ) as HTMLUListElement | null;
+  const rightItemList = win.document.querySelector(
+    "#right-item-list",
+  ) as HTMLUListElement | null;
+  const messageNode = win.document.querySelector(
+    "#ambiguous-merge-message",
+  ) as HTMLElement | null;
+  const mergeButton = win.document.querySelector(
+    "#merge-selected",
+  ) as HTMLButtonElement | null;
+  const skipButton = win.document.querySelector(
+    "#skip-merge",
+  ) as HTMLButtonElement | null;
+  const closeButton = win.document.querySelector(
+    "#close-window",
+  ) as HTMLButtonElement | null;
+
+  if (!candidateSelect || !mergeButton || !skipButton || !closeButton) {
+    try {
+      win.close();
+    } catch (e) {
+      ztoolkit.log?.(`[AuthorBrowser] Close ambiguous window failed: ${String(e)}`);
+    }
+    return { action: "skip-current" };
+  }
+
+  if (progressNode) {
+    progressNode.textContent = getString("bulk-merge-ambiguous-progress", {
+      args: { index, total },
+    });
+  }
+  if (noteNode) {
+    noteNode.textContent = getString("bulk-merge-ambiguous-note");
+  }
+  if (leftAuthorNameNode) {
+    leftAuthorNameNode.textContent = getCreatorLabel(group.abbrevMainID);
+  }
+
+  const leftItems = await getAuthorPreviewItemsForMain(group.abbrevMainID);
+  renderPreviewItems(leftItemList, leftItems);
+
+  for (const candidateMainID of group.candidateMainIDs) {
+    const option = win.document.createElement("option");
+    option.value = String(candidateMainID);
+    option.textContent = getCreatorLabel(candidateMainID);
+    candidateSelect.appendChild(option);
+  }
+
+  const rightItemCache = new Map<number, AuthorPreviewItemRow[]>();
+  const setMessage = (message: string) => {
+    if (messageNode) {
+      messageNode.textContent = message;
+    }
+  };
+
+  let currentSelectedMainID = group.candidateMainIDs[0] || -1;
+  let switchToken = 0;
+  const updateRightPanel = async () => {
+    const selectedMainID = Number(candidateSelect.value) || -1;
+    currentSelectedMainID = selectedMainID;
+    if (rightAuthorNameNode) {
+      rightAuthorNameNode.textContent =
+        selectedMainID > 0 ? getCreatorLabel(selectedMainID) : "-";
+    }
+    if (selectedMainID <= 0) {
+      renderPreviewItems(rightItemList, []);
+      return;
+    }
+
+    const token = ++switchToken;
+    setMessage(getString("bulk-merge-ambiguous-loading"));
+    if (!rightItemCache.has(selectedMainID)) {
+      rightItemCache.set(
+        selectedMainID,
+        await getAuthorPreviewItemsForMain(selectedMainID),
+      );
+    }
+    if (token !== switchToken) {
+      return;
+    }
+    renderPreviewItems(rightItemList, rightItemCache.get(selectedMainID) || []);
+    setMessage("");
+  };
+
+  candidateSelect.addEventListener("change", () => {
+    updateRightPanel();
+  });
+  if (group.candidateMainIDs.length > 0) {
+    candidateSelect.value = String(group.candidateMainIDs[0]);
+    await updateRightPanel();
+  } else {
+    renderPreviewItems(rightItemList, []);
+  }
+
+  bindPreviewOpenInLibrary(leftItemList);
+  bindPreviewOpenInLibrary(rightItemList);
+
+  const result = await new Promise<AmbiguousWindowDecision>((resolve) => {
+    let resolved = false;
+    const finish = (decision: AmbiguousWindowDecision) => {
+      if (resolved) {
+        return;
+      }
+      resolved = true;
+      try {
+        if (isWindowAlive(win)) {
+          win.close();
+        }
+      } catch (e) {
+        ztoolkit.log?.(`[AuthorBrowser] Close ambiguous window failed: ${String(e)}`);
+      }
+      resolve(decision);
+    };
+
+    mergeButton.addEventListener("click", () => {
+      if (currentSelectedMainID <= 0) {
+        setMessage(getString("bulk-merge-ambiguous-select-required"));
+        return;
+      }
+      finish({
+        action: "selected",
+        selectedMainID: currentSelectedMainID,
+      });
+    });
+    skipButton.addEventListener("click", () => {
+      finish({ action: "skip-current" });
+    });
+    closeButton.addEventListener("click", () => {
+      finish({ action: "skip-all" });
+    });
+    win.addEventListener("unload", () => {
+      finish({ action: "skip-current" });
+    });
+  });
+
+  return result;
+}
+
+function bindPreviewOpenInLibrary(listNode: HTMLUListElement | null) {
+  if (!listNode) {
+    return;
+  }
+  listNode.addEventListener("dblclick", (event) => {
+    const targetNode = event.target as Element | null;
+    const itemNode = targetNode?.closest?.("li[data-item-id]") as
+      | HTMLLIElement
+      | null;
+    if (!itemNode) {
+      return;
+    }
+    const itemID = Number(itemNode.dataset.itemId) || -1;
+    if (itemID > 0) {
+      openItemInMainWindow(itemID);
+    }
+  });
+}
+
+function renderPreviewItems(
+  listNode: HTMLUListElement | null,
+  items: AuthorPreviewItemRow[],
+) {
+  if (!listNode) {
+    return;
+  }
+  listNode.innerHTML = "";
+  if (!items || items.length === 0) {
+    const placeholder = listNode.ownerDocument.createElement("li");
+    placeholder.className = "placeholder";
+    placeholder.textContent = getString("bulk-merge-ambiguous-no-items");
+    listNode.appendChild(placeholder);
+    return;
+  }
+  for (const item of items) {
+    const li = listNode.ownerDocument.createElement("li");
+    li.dataset.itemId = String(item.itemID);
+    li.title = item.title;
+    const year = item.year ? `[${item.year}] ` : "";
+    li.textContent = `${year}${item.title}`;
+    listNode.appendChild(li);
+  }
+}
+
+async function getAuthorPreviewItemsForMain(mainID: number, limit = 120) {
+  const resolvedMainID = resolveMainID(mainID);
+  if (resolvedMainID <= 0) {
+    return [];
+  }
+  const creator = Zotero.Creators.get(resolvedMainID);
+  if (!creator) {
+    return [];
+  }
+
+  const names = new Set<string>();
+  const mainFullName = formatCreatorFullName(creator.firstName, creator.lastName);
+  if (mainFullName) {
+    names.add(mainFullName);
+  }
+  const aliases = getAllAliasByMainID(resolvedMainID);
+  for (const aliasID of aliases) {
+    const aliasCreator = Zotero.Creators.get(aliasID);
+    if (!aliasCreator) {
+      continue;
+    }
+    const aliasFullName = formatCreatorFullName(
+      aliasCreator.firstName,
+      aliasCreator.lastName,
+    );
+    if (aliasFullName) {
+      names.add(aliasFullName);
+    }
+  }
+  if (names.size === 0) {
+    return [];
+  }
+
+  const search = new Zotero.Search({
+    libraryID: Zotero.Libraries.userLibraryID,
+  });
+  search.addCondition("joinMode", "any");
+  for (const fullName of Array.from(names)) {
+    search.addCondition("creator", "is", fullName);
+  }
+  const itemIDs = (await search.search()) || [];
+  const uniqueIDs = Array.from(
+    new Set(itemIDs.map((id) => Number(id)).filter((id) => id > 0)),
+  );
+  const items = (Zotero.Items.get(uniqueIDs) || []).filter(
+    (item: any) => !!item && !item.deleted,
+  );
+  const rows = items.map((item: any) => ({
+    itemID: Number(item.id) || -1,
+    title: String(item.getField("title") || "").trim() || `#${item.id}`,
+    year: parseYear(item.getField("date")),
+  }));
+  rows.sort((left, right) => {
+    const leftYear = Number(left.year) || 0;
+    const rightYear = Number(right.year) || 0;
+    if (leftYear !== rightYear) {
+      return rightYear - leftYear;
+    }
+    return left.title.localeCompare(right.title);
+  });
+  return rows.slice(0, Math.max(1, limit));
+}
+
+function parseYear(value: any) {
+  const text = String(value || "");
+  const match = text.match(/(\d{4})/);
+  return match ? match[1] : "";
+}
+
+function formatCreatorFullName(firstName: string, lastName: string) {
+  return `${(firstName || "").trim()} ${(lastName || "").trim()}`.trim();
+}
+
+function openItemInMainWindow(itemID: number) {
+  const mainWindow = Zotero.getMainWindow() as any;
+  const pane = mainWindow?.ZoteroPane;
+  if (pane && typeof pane.selectItem === "function") {
+    Promise.resolve(pane.selectItem(itemID)).catch((error) => {
+      ztoolkit.log?.(
+        `[AuthorBrowser] selectItem failed for ${itemID}: ${String(error)}`,
+      );
+    });
+    mainWindow?.focus?.();
+    return;
+  }
+  const item = Zotero.Items.get(itemID);
+  if (item && typeof item.openDetailWindow === "function") {
+    item.openDetailWindow();
+  }
 }
 
 function getPromptParentWindow() {
@@ -870,7 +1576,10 @@ function getPromptParentWindow() {
   return Zotero.getMainWindow();
 }
 
-function resolveLiveMergeTargets(group: BulkMergeGroupPlan) {
+function resolveLiveMergeTargets(group: {
+  targetMainID: number;
+  candidateMainIDs: number[];
+}) {
   const targetMainID = resolveMainID(group.targetMainID);
   const candidateMainIDs = Array.from(
     new Set(group.candidateMainIDs.map((id) => resolveMainID(id))),
@@ -881,24 +1590,37 @@ function resolveLiveMergeTargets(group: BulkMergeGroupPlan) {
   };
 }
 
+function resolveLiveAmbiguousTargets(group: BulkMergeAmbiguousPlan) {
+  const abbrevMainID = resolveMainID(group.abbrevMainID);
+  const candidateMainIDs = Array.from(
+    new Set(group.candidateMainIDs.map((id) => resolveMainID(id))),
+  ).filter((id) => id > 0 && id !== abbrevMainID);
+  return {
+    abbrevMainID,
+    candidateMainIDs,
+  };
+}
+
 async function executeBatchMergeGroup(
   report: BulkMergeReport,
-  group: BulkMergeGroupPlan,
+  group: {
+    phase: BulkMergePhase;
+    targetMainID: number;
+    candidateMainIDs: number[];
+  },
   decision: BulkMergeDecision,
+  reason: string,
 ) {
   const { targetMainID, candidateMainIDs: uniqueCandidateMainIDs } =
     resolveLiveMergeTargets(group);
 
   if (targetMainID <= 0 || uniqueCandidateMainIDs.length === 0) {
-    report.entries.push({
+    appendBatchMergeEntry(report, {
       phase: group.phase,
       targetMainID: targetMainID > 0 ? targetMainID : group.targetMainID,
-      targetMainName: getCreatorLabel(
-        targetMainID > 0 ? targetMainID : group.targetMainID,
-      ),
       candidateMainIDs: uniqueCandidateMainIDs,
-      candidateMainNames: uniqueCandidateMainIDs.map((id) => getCreatorLabel(id)),
       decision: "skipped",
+      reason,
       addedAliasCount: 0,
       mergedGroupCount: 0,
       skippedCount: uniqueCandidateMainIDs.length,
@@ -907,32 +1629,18 @@ async function executeBatchMergeGroup(
     return;
   }
 
-  if (decision === "skipped") {
-    report.skippedCount += uniqueCandidateMainIDs.length;
-    report.entries.push({
+  if (
+    decision === "skipped" ||
+    decision === "manual-no" ||
+    decision === "manual-all-no" ||
+    decision === "ambiguous-skipped"
+  ) {
+    appendBatchMergeEntry(report, {
       phase: group.phase,
       targetMainID,
-      targetMainName: getCreatorLabel(targetMainID),
       candidateMainIDs: uniqueCandidateMainIDs,
-      candidateMainNames: uniqueCandidateMainIDs.map((id) => getCreatorLabel(id)),
       decision,
-      addedAliasCount: 0,
-      mergedGroupCount: 0,
-      skippedCount: uniqueCandidateMainIDs.length,
-      conflictCount: 0,
-    });
-    return;
-  }
-
-  if (decision === "no" || decision === "all-no") {
-    report.skippedCount += uniqueCandidateMainIDs.length;
-    report.entries.push({
-      phase: group.phase,
-      targetMainID,
-      targetMainName: getCreatorLabel(targetMainID),
-      candidateMainIDs: uniqueCandidateMainIDs,
-      candidateMainNames: uniqueCandidateMainIDs.map((id) => getCreatorLabel(id)),
-      decision,
+      reason,
       addedAliasCount: 0,
       mergedGroupCount: 0,
       skippedCount: uniqueCandidateMainIDs.length,
@@ -948,21 +1656,89 @@ async function executeBatchMergeGroup(
     mergeGroups: true,
   });
 
-  report.addedAliasCount += result.addedAliasIDs.length;
-  report.mergedGroupCount += result.mergedGroupMainIDs.length;
-  report.skippedCount += result.skippedAliasIDs.length;
-  report.conflictCount += result.conflictAliasIDs.length;
-  report.entries.push({
+  appendBatchMergeEntry(report, {
     phase: group.phase,
     targetMainID,
-    targetMainName: getCreatorLabel(targetMainID),
     candidateMainIDs: uniqueCandidateMainIDs,
-    candidateMainNames: uniqueCandidateMainIDs.map((id) => getCreatorLabel(id)),
     decision,
+    reason,
     addedAliasCount: result.addedAliasIDs.length,
     mergedGroupCount: result.mergedGroupMainIDs.length,
     skippedCount: result.skippedAliasIDs.length,
     conflictCount: result.conflictAliasIDs.length,
+  });
+}
+
+async function executeAmbiguousSelectedMerge(
+  report: BulkMergeReport,
+  abbrevMainID: number,
+  selectedCandidateMainID: number,
+  reason: string,
+) {
+  await executeBatchMergeGroup(
+    report,
+    {
+      phase: "phase2-ambiguous",
+      targetMainID: selectedCandidateMainID,
+      candidateMainIDs: [abbrevMainID],
+    },
+    "ambiguous-selected",
+    reason,
+  );
+}
+
+function recordAmbiguousSkip(
+  report: BulkMergeReport,
+  abbrevMainID: number,
+  candidateMainIDs: number[],
+  reason: string,
+) {
+  const uniqueCandidateMainIDs = Array.from(
+    new Set(candidateMainIDs.map((id) => resolveMainID(id))),
+  ).filter((id) => id > 0);
+  appendBatchMergeEntry(report, {
+    phase: "phase2-ambiguous",
+    targetMainID: resolveMainID(abbrevMainID) || abbrevMainID,
+    candidateMainIDs: uniqueCandidateMainIDs,
+    decision: "ambiguous-skipped",
+    reason,
+    addedAliasCount: 0,
+    mergedGroupCount: 0,
+    skippedCount: uniqueCandidateMainIDs.length > 0 ? 1 : 0,
+    conflictCount: 0,
+  });
+}
+
+function appendBatchMergeEntry(
+  report: BulkMergeReport,
+  entry: {
+    phase: BulkMergePhase;
+    targetMainID: number;
+    candidateMainIDs: number[];
+    decision: BulkMergeDecision;
+    reason: string;
+    addedAliasCount: number;
+    mergedGroupCount: number;
+    skippedCount: number;
+    conflictCount: number;
+  },
+) {
+  report.addedAliasCount += entry.addedAliasCount;
+  report.mergedGroupCount += entry.mergedGroupCount;
+  report.skippedCount += entry.skippedCount;
+  report.conflictCount += entry.conflictCount;
+  report.entries.push({
+    phase: entry.phase,
+    targetMainID: entry.targetMainID,
+    targetMainName: getCreatorLabel(entry.targetMainID),
+    candidateMainIDs: entry.candidateMainIDs,
+    candidateMainNames: entry.candidateMainIDs.map((id) => getCreatorLabel(id)),
+    decision: entry.decision,
+    reason: entry.reason,
+    addedAliasCount: entry.addedAliasCount,
+    mergedGroupCount: entry.mergedGroupCount,
+    skippedCount: entry.skippedCount,
+    conflictCount: entry.conflictCount,
   });
 }
 
@@ -1022,34 +1798,64 @@ function formatBatchMergeReport(report: BulkMergeReport) {
     }),
   );
   lines.push("");
-
-  const phase1Entries = report.entries.filter(
-    (entry) => entry.phase === "phase1-normalized",
+  lines.push(
+    getString("bulk-merge-details-counts", {
+      args: {
+        phase1a: report.phase1NormalizedCount,
+        phase1b: report.phase1AbbrevCount,
+        phase2a: report.phase2AmbiguousCount,
+        phase2b: report.phase2ManualCount,
+      },
+    }),
   );
-  const phase2Entries = report.entries.filter(
-    (entry) => entry.phase === "phase2-initial",
-  );
-
-  lines.push(getString("bulk-merge-details-stage1"));
-  if (phase1Entries.length === 0) {
-    lines.push(`  ${getString("bulk-merge-details-none")}`);
-  } else {
-    for (const entry of phase1Entries) {
-      lines.push(`  ${formatBatchMergeReportEntry(entry)}`);
-    }
-  }
-
   lines.push("");
-  lines.push(getString("bulk-merge-details-stage2"));
-  if (phase2Entries.length === 0) {
-    lines.push(`  ${getString("bulk-merge-details-none")}`);
-  } else {
-    for (const entry of phase2Entries) {
-      lines.push(`  ${formatBatchMergeReportEntry(entry)}`);
-    }
-  }
+
+  appendEntriesByPhase(
+    lines,
+    report.entries,
+    "phase1-normalized",
+    getString("bulk-merge-details-phase1a"),
+  );
+  lines.push("");
+  appendEntriesByPhase(
+    lines,
+    report.entries,
+    "phase1-abbrev",
+    getString("bulk-merge-details-phase1b"),
+  );
+  lines.push("");
+  appendEntriesByPhase(
+    lines,
+    report.entries,
+    "phase2-ambiguous",
+    getString("bulk-merge-details-phase2a"),
+  );
+  lines.push("");
+  appendEntriesByPhase(
+    lines,
+    report.entries,
+    "phase2-manual",
+    getString("bulk-merge-details-phase2b"),
+  );
 
   return lines.join("\n");
+}
+
+function appendEntriesByPhase(
+  lines: string[],
+  entries: BulkMergeDetailEntry[],
+  phase: BulkMergePhase,
+  title: string,
+) {
+  lines.push(title);
+  const phaseEntries = entries.filter((entry) => entry.phase === phase);
+  if (phaseEntries.length === 0) {
+    lines.push(`  ${getString("bulk-merge-details-none")}`);
+    return;
+  }
+  for (const entry of phaseEntries) {
+    lines.push(`  ${formatBatchMergeReportEntry(entry)}`);
+  }
 }
 
 function formatBatchMergeReportEntry(entry: BulkMergeDetailEntry) {
@@ -1060,6 +1866,7 @@ function formatBatchMergeReportEntry(entry: BulkMergeDetailEntry) {
       : getString("bulk-merge-details-none");
   return (
     `${entry.targetMainName} <- ${candidates} | ` +
+    `${getString("bulk-merge-details-reason-label")}: ${entry.reason} | ` +
     `${getString("bulk-merge-details-decision-label")}: ${decisionLabel} | ` +
     `${getString("bulk-merge-details-added-label")}: ${entry.addedAliasCount} | ` +
     `${getString("bulk-merge-details-merged-groups-label")}: ${entry.mergedGroupCount} | ` +
@@ -1069,20 +1876,29 @@ function formatBatchMergeReportEntry(entry: BulkMergeDetailEntry) {
 }
 
 function getBatchMergeDecisionLabel(decision: BulkMergeDecision) {
-  if (decision === "auto") {
-    return getString("bulk-merge-details-decision-auto");
+  if (decision === "auto-normalized") {
+    return getString("bulk-merge-details-decision-auto-normalized");
   }
-  if (decision === "yes") {
-    return getString("bulk-merge-details-decision-yes");
+  if (decision === "auto-abbrev") {
+    return getString("bulk-merge-details-decision-auto-abbrev");
   }
-  if (decision === "all-yes") {
-    return getString("bulk-merge-details-decision-all-yes");
+  if (decision === "manual-yes") {
+    return getString("bulk-merge-details-decision-manual-yes");
   }
-  if (decision === "all-no") {
-    return getString("bulk-merge-details-decision-all-no");
+  if (decision === "manual-all-yes") {
+    return getString("bulk-merge-details-decision-manual-all-yes");
   }
-  if (decision === "no") {
-    return getString("bulk-merge-details-decision-no");
+  if (decision === "manual-no") {
+    return getString("bulk-merge-details-decision-manual-no");
+  }
+  if (decision === "manual-all-no") {
+    return getString("bulk-merge-details-decision-manual-all-no");
+  }
+  if (decision === "ambiguous-selected") {
+    return getString("bulk-merge-details-decision-ambiguous-selected");
+  }
+  if (decision === "ambiguous-skipped") {
+    return getString("bulk-merge-details-decision-ambiguous-skipped");
   }
   return getString("bulk-merge-details-decision-skipped");
 }

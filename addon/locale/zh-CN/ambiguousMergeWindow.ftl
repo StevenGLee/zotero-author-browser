@@ -1,0 +1,17 @@
+title = 缩写歧义判断
+abbrev-panel-title = 待定缩写条目
+candidate-panel-title = 候选主作者
+candidate-select-label = 请选择一个候选主作者作为合并目标：
+author-label = 作者
+organization-label = 单位
+email-label = 邮箱
+placeholder-reserved = （预留）
+merge-selected =
+    .label = 合并到选中候选
+    .tooltiptext = 将缩写条目合并到当前选中的候选主作者
+skip-merge =
+    .label = 本次不合并
+    .tooltiptext = 当前批量流程中仅跳过本组歧义
+close-window =
+    .label = 后续歧义全部暂不合并
+    .tooltiptext = 当前批量流程中，跳过本组及后续所有歧义分组

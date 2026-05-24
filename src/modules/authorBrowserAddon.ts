@@ -1,6 +1,6 @@
 /// @ts-nocheck
 import { getString } from "../utils/locale";
-import { onDialog } from "./authorBrowserDialog";
+import { onDialog, runBatchMergeFromToolMenu } from "./authorBrowserDialog";
 import { getPref, setPref } from "../utils/prefs";
 
 export interface CreatorDataRow {
@@ -87,15 +87,21 @@ export function registerToolsMenuItem() {
   });
   ztoolkit.Menu.register("menuTools", {
     tag: "menuitem",
-    id: "author-browser-tool-menu-item",
+    id: "author-browser-tool-menu-open",
     label: getString("tool-menu-item-label"),
     commandListener: () => onDialog(),
   });
   ztoolkit.Menu.register("menuTools", {
     tag: "menuitem",
-    id: "author-browser-tool-menu-item",
+    id: "author-browser-tool-menu-clear-search",
     label: getString("tool-menu-clear-search"),
     commandListener: () => deleteABSavedSearches(),
+  });
+  ztoolkit.Menu.register("menuTools", {
+    tag: "menuitem",
+    id: "author-browser-tool-menu-auto-merge",
+    label: getString("tool-menu-auto-merge"),
+    commandListener: () => runBatchMergeFromToolMenu(),
   });
 }
 
