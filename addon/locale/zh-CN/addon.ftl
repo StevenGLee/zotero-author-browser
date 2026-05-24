@@ -45,3 +45,45 @@ alias-editor-confirm-merge-suffix = 位作者到当前主作者。是否继续�
 alias-editor-merge-preview-more = ……以及更多分组
 
 search-author-cnki = 在 CNKI 中搜索该作者
+
+bulk-merge-confirm-intro = 此操作将执行两阶段合并。
+bulk-merge-confirm-title = 确认批量合并
+bulk-merge-confirm-phase1 = 第一阶段自动合并分组数：
+bulk-merge-confirm-phase2 = 第二阶段待确认分组数：
+bulk-merge-confirm-continue = 是否继续？
+bulk-merge-msg-precheck-cancelled = 执行前已取消合并。
+bulk-merge-msg-no-candidates = 未发现可合并的作者分组。
+bulk-merge-msg-running = 正在执行批量合并...
+bulk-merge-msg-cancelled = 批量合并已取消。
+bulk-merge-msg-error-prefix = 批量合并失败：
+bulk-merge-msg-finished = 批量合并完成 | 已添加：{ $added } | 已合并分组：{ $mergedGroups } | 已跳过：{ $skipped } | 已阻止：{ $conflicts }
+bulk-merge-msg-finished-no-changes = 批量合并完成，未应用任何变更。
+
+bulk-merge-prompt-title = 确认首字母匹配分组合并
+bulk-merge-prompt-progress = 分组 { $index } / { $total }
+bulk-merge-prompt-target = 目标主作者：{ $target }
+bulk-merge-prompt-candidates = 候选作者：{ $candidates }
+bulk-merge-prompt-note = 请选择本组处理方式。
+bulk-merge-prompt-apply-all = 将本次选择应用到后续所有分组
+bulk-merge-action-yes = 是
+bulk-merge-action-no = 否
+bulk-merge-action-all-yes = 全部选是
+bulk-merge-action-all-no = 全部选否
+
+bulk-merge-details-title = 批量合并详情
+bulk-merge-details-empty = 最近一次运行没有可展示的明细记录。
+bulk-merge-details-summary = 汇总 | 已添加：{ $added } | 已合并分组：{ $mergedGroups } | 已跳过：{ $skipped } | 已阻止：{ $conflicts }
+bulk-merge-details-stage1 = 第一阶段：规范化全名完全一致（自动合并）
+bulk-merge-details-stage2 = 第二阶段：同姓 + 名字首字母（人工决策）
+bulk-merge-details-none = （无）
+bulk-merge-details-decision-label = 决策
+bulk-merge-details-added-label = 已添加
+bulk-merge-details-merged-groups-label = 已合并分组
+bulk-merge-details-skipped-label = 已跳过
+bulk-merge-details-conflict-label = 已阻止
+bulk-merge-details-decision-auto = 自动
+bulk-merge-details-decision-yes = 是
+bulk-merge-details-decision-no = 否
+bulk-merge-details-decision-all-yes = 全部选是
+bulk-merge-details-decision-all-no = 全部选否
+bulk-merge-details-decision-skipped = 跳过

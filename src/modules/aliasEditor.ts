@@ -11,6 +11,7 @@ import {
   hasAliasGroup,
   resolveMainID,
 } from "./authorBrowserAddon";
+import { getCreatorNameMatchType } from "./authorNameMatch";
 
 interface SuggestedAliasRow {
   creatorID: number;
@@ -449,27 +450,11 @@ function getSuggestionMatch(
   mainCreator: CreatorStatDataRow,
   candidate: CreatorStatDataRow,
 ) {
-  const mainFirstName = normalizeNamePart(mainCreator.firstName || "");
-  const mainLastName = normalizeNamePart(mainCreator.lastName || "");
-  const candidateFirstName = normalizeNamePart(candidate.firstName || "");
-  const candidateLastName = normalizeNamePart(candidate.lastName || "");
-
-  const mainFullName = `${mainFirstName} ${mainLastName}`.trim();
-  const candidateFullName = `${candidateFirstName} ${candidateLastName}`.trim();
-  if (mainFullName && mainFullName === candidateFullName) {
+  const matchType = getCreatorNameMatchType(mainCreator, candidate);
+  if (matchType === "normalized-full-name") {
     return { reason: getString("alias-editor-match-normalized"), priority: 0 };
   }
-
-  const sameLastName = mainLastName && mainLastName === candidateLastName;
-  if (!sameLastName) {
-    return null;
-  }
-  const mainInitial = getFirstInitial(mainFirstName);
-  const candidateInitial = getFirstInitial(candidateFirstName);
-  if (!mainInitial || !candidateInitial || mainInitial !== candidateInitial) {
-    return null;
-  }
-  if (isInitialLike(mainFirstName) || isInitialLike(candidateFirstName)) {
+  if (matchType === "same-last-name-initial") {
     return { reason: getString("alias-editor-match-initial"), priority: 1 };
   }
   return null;
@@ -774,24 +759,6 @@ function updateButtons(session: AliasEditorSession) {
   addAllButton.disabled = !hasMain || session.suggestedRows.length === 0;
   addBrowserButton.disabled = !hasMain;
   restoreButton.disabled = !hasMain || selectedAliasRows.length === 0;
-}
-
-function normalizeNamePart(value: string) {
-  return (value || "")
-    .toLowerCase()
-    .replace(/[`~!@#$%^&*()_|+\-=?;:'",.<>{}\[\]\\\/]/g, " ")
-    .replace(/\s+/g, " ")
-    .trim();
-}
-
-function getFirstInitial(name: string) {
-  const token = normalizeNamePart(name).split(" ")[0] || "";
-  return token ? token[0] : "";
-}
-
-function isInitialLike(name: string) {
-  const token = normalizeNamePart(name).split(" ")[0] || "";
-  return token.length === 1;
 }
 
 function getCreatorDisplayName(creatorID: number) {

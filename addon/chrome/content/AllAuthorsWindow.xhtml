@@ -104,6 +104,16 @@
       #manager-table {
         height: 100%;
       }
+
+      #bulk-merge-message {
+        min-width: 260px;
+        margin-left: 10px;
+        font-size: 12px;
+        color: var(--color-text-secondary);
+        overflow: hidden;
+        text-overflow: ellipsis;
+        white-space: nowrap;
+      }
     </style>
   </head>
 
@@ -121,11 +131,17 @@
       <button id="refresh" data-l10n-id="refresh"></button>
       <button id="rename" data-l10n-id="rename"></button>
       <button id="alias" data-l10n-id="alias"></button>
+      <button id="bulk-merge" data-l10n-id="bulk-merge"></button>
+      <button
+        id="bulk-merge-details"
+        data-l10n-id="bulk-merge-details"
+      ></button>
       <button id="swap" data-l10n-id="swap"></button>
       <button id="fix-caps" data-l10n-id="fix-caps"></button>
       <button id="show-item" data-l10n-id="show-item"></button>
       <button id="search-scholar" data-l10n-id="search-scholar"></button>
       <button id="search-cnki" data-l10n-id="search-cnki"></button>
+      <html:div id="bulk-merge-message"></html:div>
     </div>
     <xul:menupopup id="author-list-context-menu">
       <xul:menuitem
