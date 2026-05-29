@@ -64,6 +64,16 @@ Current manifest compatibility target: Zotero 9.x through 10.x beta (`strict_max
 2. Review summary metrics and per-group decisions.
 3. Use this as a post-run audit trail before additional manual cleanup.
 
+### 7) Author Filter in tag area (new)
+
+1. Author Browser now supports an in-pane `Author Filter` inside the current tag area.
+2. Selecting authors filters items immediately without creating temporary saved searches.
+3. Supports:
+   - Scope switch: `Current View` / `Current Library`
+   - Composition switch: `With Other Filters` / `Author Only`
+   - Multi-author mode: `OR` / `AND`
+   - Alias-aware filtering by default (`Include Aliases`)
+
 ## Usage Guide
 
 ### 1) Review coverage and open related items
