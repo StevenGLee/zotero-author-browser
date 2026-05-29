@@ -6,6 +6,10 @@ import {
   registerToolsMenuItem,
   deleteABSavedSearches,
 } from "./modules/authorBrowserAddon";
+import {
+  destroyAuthorFilterPanel,
+  initAuthorFilterPanel,
+} from "./modules/authorFilterPanel";
 
 async function onStartup() {
   await Promise.all([
@@ -28,14 +32,17 @@ async function onMainWindowLoad(win: Window): Promise<void> {
 
   registerCreatorTransformMenuItem();
   registerToolsMenuItem();
+  await initAuthorFilterPanel(win);
 }
 
 async function onMainWindowUnload(win: Window): Promise<void> {
+  destroyAuthorFilterPanel(win);
   deleteABSavedSearches();
   ztoolkit.unregisterAll();
 }
 
 function onShutdown(): void {
+  destroyAuthorFilterPanel();
   ztoolkit.unregisterAll();
 
   deleteABSavedSearches();
