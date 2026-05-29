@@ -95,7 +95,13 @@ export function registerToolsMenuItem() {
     tag: "menuitem",
     id: "author-browser-tool-menu-clear-search",
     label: getString("tool-menu-clear-search"),
-    commandListener: () => deleteABSavedSearches(),
+    commandListener: async () => {
+      const module = await import("./authorFilterPanel");
+      const cleared = await module.clearAuthorFilter();
+      if (!cleared) {
+        await deleteABSavedSearches();
+      }
+    },
   });
   ztoolkit.Menu.register("menuTools", {
     tag: "menuitem",
@@ -172,6 +178,7 @@ export async function saveCreatorAlias() {
   ensureAuthorAliasesLoaded();
   addon.data.authorAliases = normalizeAuthorAliases(addon.data.authorAliases);
   persistAuthorAliases();
+  notifyAuthorFilterAliasChanged();
 }
 
 export function resolveMainID(id: number) {
@@ -219,6 +226,7 @@ export function makeAuthorAlias(mainID: number, aliasID: number) {
   }
   addon.data.authorAliases = normalizeAuthorAliases(addon.data.authorAliases);
   persistAuthorAliases();
+  notifyAuthorFilterAliasChanged();
   return 0;
 }
 
@@ -247,6 +255,7 @@ export function removeAuthorAlias(mainID: number, aliasID: number) {
   );
   addon.data.authorAliases = normalizeAuthorAliases(addon.data.authorAliases);
   persistAuthorAliases();
+  notifyAuthorFilterAliasChanged();
   return 0;
 }
 
@@ -270,6 +279,7 @@ export async function applyAliasMutation(
   if (mutation.type === "replace") {
     addon.data.authorAliases = normalizeAuthorAliases(mutation.aliases);
     persistAuthorAliases();
+    notifyAuthorFilterAliasChanged();
     return result;
   }
 
@@ -396,6 +406,7 @@ export async function applyAliasMutation(
     );
     addon.data.authorAliases = normalizeAuthorAliases(addon.data.authorAliases);
     persistAuthorAliases();
+    notifyAuthorFilterAliasChanged();
   }
 
   result.conflictAliasIDs = Array.from(conflictSet);
@@ -504,15 +515,23 @@ export function getAllAliasByMainID(mainID: number) {
 
 export async function showAuthorByID(id: number) {
   ensureAuthorAliasesLoaded();
+  const panelModule = await import("./authorFilterPanel");
+  const usedPanel = await panelModule.activateAuthorFilterByCreatorID(id);
+  if (usedPanel) {
+    return;
+  }
   const mainID = resolveMainID(id);
   const creator = Zotero.Creators.get(mainID);
   if (!creator) {
     return;
   }
   const fullName = formatFullName(creator.firstName, creator.lastName);
+  const selectedLibraryID = Number(ZoteroPane?.getSelectedLibraryID?.());
+  const fallbackLibraryID =
+    selectedLibraryID > 0 ? selectedLibraryID : Zotero.Libraries.userLibraryID;
   const s = new Zotero.Search({
     name: fullName,
-    libraryID: Zotero.Libraries.userLibraryID,
+    libraryID: fallbackLibraryID,
   });
   s.addCondition("joinMode", "any");
   s.addCondition("creator", "is", fullName);
@@ -536,7 +555,7 @@ export async function showAuthorFromPopupMenu(ev: Event) {
   if (id <= 0) {
     return;
   }
-  showAuthorByID(id);
+  await showAuthorByID(id);
 }
 
 export async function searchAuthorInGoogleScholarByID(id: number) {
@@ -828,6 +847,12 @@ function persistAuthorAliases() {
   const normalized = normalizeAuthorAliases(addon.data.authorAliases);
   addon.data.authorAliases = normalized;
   setPref(AUTHOR_ALIAS_PREF_KEY, JSON.stringify(normalized));
+}
+
+function notifyAuthorFilterAliasChanged() {
+  import("./authorFilterPanel")
+    .then((module) => module.refreshAuthorFilterIfOpen())
+    .catch(() => undefined);
 }
 
 function normalizeAuthorAliases(rawValue: any): AuthorAliasState {
